@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable
@@ -139,7 +140,13 @@ class StockfishEngine:
         threads: int = 2,
         hash_mb: int = 256,
     ) -> None:
-        self.binary = binary or shutil.which("stockfish") or "stockfish"
+        # Debian's package installs to /usr/games, which slim images omit from PATH.
+        self.binary = (
+            binary
+            or os.getenv("STOCKFISH_PATH")
+            or shutil.which("stockfish")
+            or ("/usr/games/stockfish" if os.path.exists("/usr/games/stockfish") else "stockfish")
+        )
         self.threads = threads
         self.hash_mb = hash_mb
         self.proc: asyncio.subprocess.Process | None = None

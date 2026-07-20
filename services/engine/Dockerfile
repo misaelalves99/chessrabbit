@@ -7,6 +7,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends stockfish \
  && rm -rf /var/lib/apt/lists/*
 
+# Debian installs the binary at /usr/games/stockfish; slim images omit
+# /usr/games from PATH.
+ENV PATH="/usr/games:${PATH}"
+
 WORKDIR /srv
 
 COPY requirements.txt .

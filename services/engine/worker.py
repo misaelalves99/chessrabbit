@@ -4,8 +4,12 @@ ChessRabbit engine worker.
 Consumes analysis jobs from Redis, runs Stockfish (server-side only), streams
 eval lines back over Redis pub/sub, and persists results to analysis_cache.
 
-Queues, in priority order:  q:pro  ->  q:free
+Queues, in priority order:  q:pro  ->  q:batch  ->  q:free
 Pub/sub channel per job:    eval:{job_id}
+
+Concurrency: one consumer task per engine in the pool, so POOL_SIZE jobs run
+in parallel. One consumer never drains q:batch (multi-minute full-game jobs),
+guaranteeing live position analysis always has an engine available.
 """
 
 from __future__ import annotations
@@ -39,7 +43,6 @@ THREADS = int(os.getenv("ENGINE_THREADS_PER_JOB", "2"))
 HASH_MB = int(os.getenv("ENGINE_HASH_MB", "256"))
 MAX_MOVETIME_MS = int(os.getenv("ENGINE_MAX_MOVETIME_MS", "60000"))
 
-QUEUES = ["q:pro", "q:free"]
 CHECKPOINT_DEPTHS = {12, 16, 18, 20, 24, 28, 30, 32}
 
 shutdown = asyncio.Event()
@@ -388,6 +391,44 @@ async def _store_annotations(
 # Main loop
 # ---------------------------------------------------------------
 
+async def consume(consumer_id: int, queues: list[str], pool: EnginePool, redis) -> None:
+    """One consumer: own DB connection, drains `queues` in priority order."""
+    conn = await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=False)
+    log.info("Consumer %d up (queues=%s)", consumer_id, queues)
+
+    while not shutdown.is_set():
+        try:
+            popped = await redis.blpop(queues, timeout=2)
+            if popped is None:
+                continue
+
+            _queue, raw = popped
+            job = json.loads(raw)
+            kind = job.get("kind", "position")
+            log.info("Consumer %d picked up job %s (%s) from %s",
+                     consumer_id, job.get("job_id"), kind, _queue)
+
+            if kind == "full_game":
+                await handle_full_game_job(pool, redis, conn, job)
+            else:
+                await handle_position_job(pool, redis, conn, job)
+
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            log.exception("Consumer %d: job failed with unhandled exception", consumer_id)
+            try:
+                await conn.rollback()
+            except Exception:
+                try:
+                    conn = await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=False)
+                except Exception:
+                    log.warning("Consumer %d: Postgres unreachable, retrying shortly", consumer_id)
+                    await asyncio.sleep(2)
+
+    await conn.close()
+
+
 async def main() -> None:
     log.info("Starting engine worker (pool=%d threads=%d hash=%dMB)", POOL_SIZE, THREADS, HASH_MB)
 
@@ -399,38 +440,22 @@ async def main() -> None:
         sys.exit(1)
 
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
-    conn = await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=False)
-    log.info("Connected to Redis and Postgres. Engine: %s", pool.version)
+    log.info("Connected to Redis. Engine: %s", pool.version)
 
-    while not shutdown.is_set():
-        try:
-            popped = await redis.blpop(QUEUES, timeout=2)
-            if popped is None:
-                continue
+    # One consumer per engine so the whole pool works in parallel. The last
+    # consumer skips q:batch: a full-game job holds an engine for minutes, and
+    # live position analysis must always have a free slot.
+    consumers: list[asyncio.Task] = []
+    for i in range(POOL_SIZE):
+        reserved = POOL_SIZE > 1 and i == POOL_SIZE - 1
+        queues = ["q:pro", "q:free"] if reserved else ["q:pro", "q:batch", "q:free"]
+        consumers.append(asyncio.create_task(consume(i, queues, pool, redis)))
 
-            _queue, raw = popped
-            job = json.loads(raw)
-            kind = job.get("kind", "position")
-            log.info("Picked up job %s (%s) from %s", job.get("job_id"), kind, _queue)
-
-            if kind == "full_game":
-                await handle_full_game_job(pool, redis, conn, job)
-            else:
-                await handle_position_job(pool, redis, conn, job)
-
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            log.exception("Job failed with unhandled exception")
-            try:
-                await conn.rollback()
-            except Exception:
-                conn = await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=False)
+    await asyncio.gather(*consumers)
 
     log.info("Shutting down engine pool")
     await pool.stop()
     await redis.aclose()
-    await conn.close()
 
 
 def _handle_signal(*_args) -> None:

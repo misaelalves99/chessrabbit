@@ -29,9 +29,14 @@ let the purge TTL get aggressive) and the engine fleet stays small.
 
 ---
 
-## Phase 0 — Code fixes that unlock scaling (do now, ~1 day)
+## Phase 0 — Code fixes that unlock scaling ✅ SHIPPED July 20, 2026
 
 These are the only *code* changes in the whole plan. Everything after is operations.
+All five items below are implemented and verified on the live stack: a full-game
+batch job plus three position analyses ran concurrently across the 3-engine pool
+(consumers picked up within 100 ms of each other; batch landed on a non-reserved
+consumer). Also fixed en route: Debian installs Stockfish at /usr/games, which
+python:3.12-slim omits from PATH — binary resolution now covers that.
 
 ### 0.1 Parallelize the engine worker loop  ← biggest single win
 `services/engine/worker.py` boots `EnginePool(size=POOL_SIZE)` (default 3 engines) but

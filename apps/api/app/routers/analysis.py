@@ -109,8 +109,10 @@ async def analyse_full_game(
     await db.commit()
     await db.refresh(job)
 
+    # q:batch, not q:pro: full-game jobs hold an engine for minutes and must
+    # never sit ahead of live position analyses (see services/engine/worker.py).
     await get_redis().rpush(
-        "q:pro",
+        "q:batch",
         json.dumps({
             "job_id": job.id, "kind": "full_game", "game_id": game_id,
             "user_id": user.id, "depth": 18,
@@ -165,7 +167,7 @@ async def analyse_collection(
     await db.commit()
     for job_out, gid in zip(out, game_ids):
         await redis.rpush(
-            "q:pro",
+            "q:batch",
             json.dumps({
                 "job_id": job_out.job_id, "kind": "full_game",
                 "game_id": gid, "user_id": user.id, "depth": 18,
