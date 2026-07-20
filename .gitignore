@@ -1,0 +1,42 @@
+# Env
+.env
+.env.local
+.env*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Data (never commit game dumps - they are gigabytes)
+data/
+*.pgn
+*.pgn.zst
+*.dump
+*.sql.gz
+
+# Engine binaries (installed via Dockerfile, never committed - see BLUEPRINT Section 3)
+stockfish
+stockfish.exe
+*.nnue

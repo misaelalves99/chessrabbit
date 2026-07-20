@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chessrabbit
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: chessrabbit
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U chessrabbit"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API deps
+        run: pip install -r apps/api/requirements.txt ruff
+      - name: Lint
+        run: ruff check apps/api services/engine pipeline
+      - name: Apply schema
+        run: |
+          sudo apt-get install -y postgresql-client
+          PGPASSWORD=devpassword psql -h 127.0.0.1 -U chessrabbit -d chessrabbit \
+            -f db/migrations/001_initial_schema.sql
+      - name: Import check
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://chessrabbit:devpassword@127.0.0.1:5432/chessrabbit
+          REDIS_URL: redis://127.0.0.1:6379/0
+          JWT_SECRET: ci-secret
+        run: python -c "from app.main import app; print('routes:', len(app.openapi()['paths']))"
+
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install engine deps + stockfish
+        run: |
+          sudo apt-get update && sudo apt-get install -y stockfish
+          pip install -r services/engine/requirements.txt
+      - name: UCI parser + live engine smoke test
+        working-directory: services/engine
+        run: |
+          python - << 'PY'
+          import asyncio
+          from uci import parse_info_line, StockfishEngine
+
+          # parser
+          r = parse_info_line("info depth 20 multipv 1 score cp 34 pv e2e4 e7e5")
+          assert r.cp == 34 and r.pv[0] == "e2e4"
+          assert parse_info_line("info string chatter") is None
+
+          # live engine
+          async def smoke():
+              e = StockfishEngine(threads=1, hash_mb=64)
+              await e.start()
+              best = None
+              async for item in e.analyse(
+                  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                  depth=10,
+              ):
+                  if isinstance(item, dict):
+                      best = item["move"]
+              await e.close()
+              assert best, "no bestmove"
+              print("bestmove:", best)
+
+          asyncio.run(smoke())
+          PY
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        working-directory: apps/web
+        run: npm install --no-audit --no-fund
+      - name: Typecheck + build
+        working-directory: apps/web
+        run: |
+          npx tsc --noEmit
+          npx next build

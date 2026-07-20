@@ -1,0 +1,257 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Chessboard } from "react-chessboard";
+import {
+  api, ApiError, Repertoire, TrainingCard, TrainingResult,
+} from "@/lib/api";
+
+type Feedback = (TrainingResult & { answered: string }) | null;
+
+export default function TrainPage() {
+  const router = useRouter();
+  const [reps, setReps] = useState<Repertoire[]>([]);
+  const [queue, setQueue] = useState<TrainingCard[]>([]);
+  const [card, setCard] = useState<TrainingCard | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [session, setSession] = useState({ right: 0, wrong: 0 });
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ name: "", color: "white" as "white" | "black", pgn: "" });
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [r, due] = await Promise.all([api.listRepertoires(), api.dueCards(20)]);
+      setReps(r);
+      setQueue(due);
+      setCard(due[0] ?? null);
+    } catch {
+      router.push("/login");
+    }
+  }, [router]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const onDrop = useCallback(
+    (from: string, to: string) => {
+      if (!card || feedback) return false;
+      const uci = `${from}${to}`;
+      api
+        .answerCard(card.id, uci)
+        .then((res) => {
+          setFeedback({ ...res, answered: uci });
+          setSession((s) =>
+            res.correct
+              ? { ...s, right: s.right + 1 }
+              : { ...s, wrong: s.wrong + 1 }
+          );
+        })
+        .catch(() => setError("Could not submit answer"));
+      // Optimistically keep the piece where the user dropped it; the
+      // feedback panel shows the verdict either way.
+      return true;
+    },
+    [card, feedback]
+  );
+
+  function next() {
+    const rest = queue.slice(1);
+    setQueue(rest);
+    setCard(rest[0] ?? null);
+    setFeedback(null);
+    if (rest.length === 0) refresh();
+  }
+
+  async function createRep(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.createRepertoire(form.name, form.color, form.pgn);
+      setCreating(false);
+      setForm({ name: "", color: "white", pgn: "" });
+      refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create repertoire");
+    }
+  }
+
+  return (
+    <div className="min-h-screen p-4 max-w-5xl mx-auto">
+      <header className="flex items-center gap-4 mb-4">
+        <Link href="/app" className="btn">← Board</Link>
+        <h1 className="text-xl font-bold">Repertoire Trainer</h1>
+        <span className="ml-auto text-sm text-muted">
+          Session: <span className="text-accent">{session.right} ✓</span>{" "}
+          <span className="text-red-400">{session.wrong} ✗</span>
+        </span>
+      </header>
+
+      {error && (
+        <p className="text-sm text-red-400 mb-3 cursor-pointer" onClick={() => setError(null)}>
+          {error} (dismiss)
+        </p>
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-6">
+        {/* Drill area */}
+        <div className="flex-1">
+          {card ? (
+            <>
+              <p className="text-sm text-muted mb-2">
+                <span className="text-ink">{card.repertoire_name}</span> · playing{" "}
+                {card.color} · card seen {card.reps}×
+              </p>
+              <div className="max-w-[440px]">
+                <Chessboard
+                  position={card.fen}
+                  onPieceDrop={onDrop}
+                  boardOrientation={card.color}
+                  arePiecesDraggable={!feedback}
+                  customDarkSquareStyle={{ backgroundColor: "#739552" }}
+                  customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+                />
+              </div>
+
+              {feedback ? (
+                <div
+                  className={`mt-3 p-3 rounded ${
+                    feedback.correct ? "bg-accent/20" : "bg-red-500/20"
+                  }`}
+                >
+                  {feedback.correct ? (
+                    <p className="text-sm">
+                      Correct — <span className="font-mono">{feedback.expected_san}</span>.
+                      Next review in {feedback.next_due_days} day
+                      {feedback.next_due_days === 1 ? "" : "s"}.
+                    </p>
+                  ) : (
+                    <p className="text-sm">
+                      Not quite. The repertoire move is{" "}
+                      <span className="font-mono font-bold">{feedback.expected_san}</span>.
+                      This card returns in ~10 minutes.
+                    </p>
+                  )}
+                  <button className="btn-primary mt-2" onClick={next} autoFocus>
+                    Next card ({queue.length - 1} left)
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-muted">
+                  Play the repertoire move for {card.color}.
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="p-8 text-center text-muted bg-panelAlt rounded">
+              {reps.length === 0 ? (
+                <>
+                  <p className="mb-2">No repertoires yet.</p>
+                  <p className="text-xs">
+                    Create one from a PGN — variations in parentheses become
+                    the opponent branches you&apos;ll be drilled on.
+                  </p>
+                </>
+              ) : (
+                <p>
+                  Nothing due right now. Come back later — spaced repetition
+                  schedules each position just before you&apos;d forget it.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Repertoire list + create */}
+        <aside className="w-full lg:w-72 shrink-0 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">My repertoires</h2>
+            <span className="flex gap-1">
+              <button
+                className="btn text-xs"
+                title="Turn engine-tagged mistakes from your analysed games into puzzles"
+                onClick={() =>
+                  api
+                    .syncBlunders()
+                    .then((r) => {
+                      setError(null);
+                      refresh();
+                      if (r.cards_created === 0 && r.mistakes_found === 0)
+                        setError("No analysed mistakes yet - run full-game analysis on a game first.");
+                    })
+                    .catch(() => setError("Could not sync blunder puzzles"))
+                }
+              >
+                ⚡ Blunders
+              </button>
+              <button className="btn text-xs" onClick={() => setCreating((c) => !c)}>
+                {creating ? "Cancel" : "+ New"}
+              </button>
+            </span>
+          </div>
+
+          {creating && (
+            <form onSubmit={createRep} className="space-y-2 bg-panelAlt p-3 rounded">
+              <input
+                className="input text-sm"
+                placeholder="Name (e.g. Italian for White)"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
+              <select
+                className="input text-sm"
+                value={form.color}
+                onChange={(e) =>
+                  setForm({ ...form, color: e.target.value as "white" | "black" })
+                }
+              >
+                <option value="white">I play White</option>
+                <option value="black">I play Black</option>
+              </select>
+              <textarea
+                className="input h-32 font-mono text-xs"
+                placeholder={"1. e4 e5 ( 1... c6 2. d4 ) 2. Nf3 *"}
+                value={form.pgn}
+                onChange={(e) => setForm({ ...form, pgn: e.target.value })}
+                required
+              />
+              <button className="btn-primary w-full text-sm">Create</button>
+            </form>
+          )}
+
+          <ul className="space-y-1">
+            {reps.map((r) => (
+              <li
+                key={r.id}
+                className="flex items-center justify-between text-sm bg-panelAlt rounded px-3 py-2"
+              >
+                <div>
+                  <div className="font-medium">{r.name}</div>
+                  <div className="text-xs text-muted">
+                    {r.color} · {r.card_count} cards ·{" "}
+                    <span className={r.due_count ? "text-accent" : ""}>
+                      {r.due_count} due
+                    </span>
+                  </div>
+                </div>
+                <button
+                  className="text-muted hover:text-red-400 text-xs"
+                  onClick={() =>
+                    api.deleteRepertoire(r.id).then(refresh).catch(() => {})
+                  }
+                  title="Delete repertoire"
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      </div>
+    </div>
+  );
+}

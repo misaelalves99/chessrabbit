@@ -1,0 +1,233 @@
+"""SQLAlchemy models mirroring db/migrations/001_initial_schema.sql."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from sqlalchemy import (
+    BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer,
+    JSON, SmallInteger, String, Text, UniqueConstraint, func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.db import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    plan: Mapped[str] = mapped_column(Text, default="free", nullable=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    games: Mapped[list["Game"]] = relationship(back_populates="owner")
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmailToken(Base):
+    __tablename__ = "email_tokens"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    stripe_customer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Game(Base):
+    __tablename__ = "games"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(Text, default="user", nullable=False)
+    white: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    black: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    white_elo: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    black_elo: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    result: Mapped[str] = mapped_column(Text, default="*", nullable=False)
+    event: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    site: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    played_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    eco: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    opening: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ply_count: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
+    movetext: Mapped[str] = mapped_column(Text, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    owner: Mapped["User | None"] = relationship(back_populates="games")
+
+
+class GamePosition(Base):
+    __tablename__ = "game_positions"
+
+    game_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("games.id", ondelete="CASCADE"), primary_key=True
+    )
+    ply: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    zobrist: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    move_uci: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class OpeningTree(Base):
+    __tablename__ = "opening_tree"
+
+    zobrist: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    move_uci: Mapped[str] = mapped_column(Text, primary_key=True)
+    games: Mapped[int] = mapped_column(Integer, nullable=False)
+    white_wins: Mapped[int] = mapped_column(Integer, nullable=False)
+    draws: Mapped[int] = mapped_column(Integer, nullable=False)
+    black_wins: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_elo: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+
+
+class AnalysisCache(Base):
+    __tablename__ = "analysis_cache"
+
+    zobrist: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    engine_version: Mapped[str] = mapped_column(Text, primary_key=True)
+    fen: Mapped[str] = mapped_column(Text, nullable=False)
+    depth: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    multipv: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnalysisJob(Base):
+    __tablename__ = "analysis_jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    game_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("games.id", ondelete="CASCADE"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(Text, default="queued", nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Annotation(Base):
+    __tablename__ = "annotations"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    game_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("games.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    ply: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    nag: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    eval_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    best_uci: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (UniqueConstraint("game_id", "user_id", "ply"),)
+
+
+class Collection(Base):
+    __tablename__ = "collections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CollectionGame(Base):
+    __tablename__ = "collection_games"
+
+    collection_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True
+    )
+    game_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("games.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class UsageDaily(Base):
+    __tablename__ = "usage_daily"
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    analyses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class ExternalAccount(Base):
+    __tablename__ = "external_accounts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    platform: Mapped[str] = mapped_column(Text, nullable=False)
+    username: Mapped[str] = mapped_column(Text, nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    games_imported: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "platform"),)
+
+
+class Repertoire(Base):
+    __tablename__ = "repertoires"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    color: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TrainingCard(Base):
+    __tablename__ = "training_cards"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    repertoire_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("repertoires.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    zobrist: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    fen: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_uci: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_san: Mapped[str] = mapped_column(Text, nullable=False)
+    ease: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
+    interval_days: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reps: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    lapses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    __table_args__ = (UniqueConstraint("repertoire_id", "zobrist"),)
