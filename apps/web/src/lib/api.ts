@@ -47,6 +47,26 @@ export interface Annotation {
   nag: number | null;
   comment: string | null;
   eval_cp: number | null;
+  best_uci: string | null;
+  classification: Classification | null;
+  review: string | null;
+}
+
+export type Classification =
+  | "book"
+  | "best"
+  | "excellent"
+  | "good"
+  | "inaccuracy"
+  | "mistake"
+  | "blunder";
+
+export interface ReviewSummary {
+  accuracy: { white: number; black: number };
+  classifications: {
+    white: Partial<Record<Classification, number>>;
+    black: Partial<Record<Classification, number>>;
+  };
 }
 
 export interface EvalLine {

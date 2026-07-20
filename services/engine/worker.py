@@ -44,6 +44,9 @@ HASH_MB = int(os.getenv("ENGINE_HASH_MB", "256"))
 MAX_MOVETIME_MS = int(os.getenv("ENGINE_MAX_MOVETIME_MS", "60000"))
 
 CHECKPOINT_DEPTHS = {12, 16, 18, 20, 24, 28, 30, 32}
+# A played move counts as "book" when this many reference games reached the
+# position and played it. Low default suits the seed DB; raise for real dumps.
+BOOK_MIN_GAMES = int(os.getenv("BOOK_MIN_GAMES", "10"))
 
 shutdown = asyncio.Event()
 
@@ -214,8 +217,9 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
     await set_job_status(conn, job_id, "running")
 
     board = chess.Board()
-    evals: list[float] = []
-    bests: list[str | None] = []
+    posinfo: list[dict] = []  # per position: {cp, mate, pv} in White perspective
+    fens: list[str] = []
+    zobs: list[int] = []
     moves: list[chess.Move] = []
 
     try:
@@ -238,13 +242,14 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
             fen = board.fen()
             zob = zobrist_of(fen)
             wtm = board.turn == chess.WHITE
+            fens.append(fen)
+            zobs.append(zob)
 
             # Terminal positions: score by rule. Asking the engine about a
             # finished game yields "mate 0", which mis-signs the eval and
             # made winning mate moves look like blunders.
             if board.is_checkmate():
-                evals.append(-10000.0 if wtm else 10000.0)
-                bests.append(None)
+                posinfo.append({"cp": -10000.0 if wtm else 10000.0, "mate": None, "pv": []})
                 await redis.publish(
                     channel,
                     json.dumps({"type": "progress", "done": idx + 1, "total": total}),
@@ -253,8 +258,7 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
                     board.push(moves[idx])
                 continue
             if board.is_stalemate() or board.is_insufficient_material():
-                evals.append(0.0)
-                bests.append(None)
+                posinfo.append({"cp": 0.0, "mate": None, "pv": []})
                 await redis.publish(
                     channel,
                     json.dumps({"type": "progress", "done": idx + 1, "total": total}),
@@ -266,8 +270,12 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
             cached = await cache_lookup(conn, zob, pool.version, depth)
             if cached:
                 lines = cached["multipv"]
-                score = _line_to_cp(lines[0]) if lines else 0.0
-                pv0 = (lines[0].get("pv") or [None])[0] if lines else None
+                first = lines[0] if lines else {}
+                posinfo.append({
+                    "cp": _line_to_cp(first) if lines else 0.0,
+                    "mate": first.get("mate"),
+                    "pv": first.get("pv") or [],
+                })
             else:
                 best: EvalLine | None = None
                 async for item in engine.analyse(fen, depth=depth, multipv=1):
@@ -275,16 +283,15 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
                         break
                     best = item
                 if best is None:
-                    score = 0.0
-                    pv0 = None
+                    posinfo.append({"cp": 0.0, "mate": None, "pv": []})
                 else:
-                    norm = best.to_white_perspective(wtm)
-                    await cache_store(conn, zob, fen, pool.version, norm.depth, [norm.as_dict()])
-                    score = _line_to_cp(norm.as_dict())
-                    pv0 = (norm.as_dict().get("pv") or [None])[0]
-
-            evals.append(score)
-            bests.append(pv0)
+                    d = best.to_white_perspective(wtm).as_dict()
+                    await cache_store(conn, zob, fen, pool.version, d["depth"], [d])
+                    posinfo.append({
+                        "cp": _line_to_cp(d),
+                        "mate": d.get("mate"),
+                        "pv": d.get("pv") or [],
+                    })
 
             await redis.publish(
                 channel,
@@ -294,14 +301,21 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
             if idx < len(moves):
                 board.push(moves[idx])
 
-    annotations = _classify_moves(evals)
-    await _store_annotations(conn, game_id, user_id, annotations, bests)
+    book_plies = await _book_plies(conn, zobs, moves)
+    annotations = _build_reviews(moves, fens, posinfo, book_plies)
+    await _store_annotations(conn, game_id, user_id, annotations)
 
+    evals = [p["cp"] for p in posinfo]
     accuracy = _accuracy_scores(evals)
-    payload = {"type": "done", "accuracy": accuracy, "moves_analysed": len(evals)}
+    payload = {
+        "type": "done",
+        "accuracy": accuracy,
+        "moves_analysed": len(evals),
+        "classifications": _summarize(annotations),
+    }
     await redis.publish(channel, json.dumps(payload))
     await set_job_status(conn, job_id, "done", result=payload)
-    log.info("job %s: full game analysed (%d positions)", job_id, len(evals))
+    log.info("job %s: full game reviewed (%d positions)", job_id, len(evals))
 
 
 def _line_to_cp(line: dict) -> float:
@@ -312,27 +326,182 @@ def _line_to_cp(line: dict) -> float:
     return float(line.get("cp") or 0)
 
 
-def _classify_moves(evals: list[float]) -> list[dict]:
+async def _book_plies(conn, zobs: list[int], moves: list) -> set[int]:
+    """Plies (first 16 only) whose played move is known opening theory."""
+    limit = min(len(moves), 16)
+    if limit == 0:
+        return set()
+    async with conn.cursor() as cur:
+        await cur.execute(
+            "SELECT zobrist, move_uci FROM opening_tree "
+            "WHERE zobrist = ANY(%s) AND games >= %s",
+            (zobs[:limit], BOOK_MIN_GAMES),
+        )
+        known = {(z, u) for z, u in await cur.fetchall()}
+    return {i for i in range(limit) if (zobs[i], moves[i].uci()) in known}
+
+
+def _san_line(fen: str, pv: list[str], limit: int = 5) -> str:
+    """Render the first few PV moves as a readable SAN line."""
+    board = chess.Board(fen)
+    sans: list[str] = []
+    for uci in pv[:limit]:
+        try:
+            move = chess.Move.from_uci(uci)
+            sans.append(board.san(move))
+            board.push(move)
+        except Exception:
+            break
+    return " ".join(sans)
+
+
+def _mate_for(info: dict, white: bool) -> int | None:
+    """Mate distance if `info` says the given side has a forced mate."""
+    m = info.get("mate")
+    if m is None:
+        return None
+    return abs(m) if (m > 0) == white else None
+
+
+NAG_BY_CLASS = {"blunder": 4, "mistake": 2, "inaccuracy": 6}
+
+
+def _build_reviews(
+    moves: list, fens: list[str], posinfo: list[dict], book_plies: set[int]
+) -> list[dict]:
     """
-    Tag each move by centipawn loss from the mover's perspective.
-    NAG codes: 2 = '?', 4 = '??', 6 = '?!'
+    Chess.com-style review: classify every move and explain it from engine
+    facts only (mates, hanging pieces, eval swings) - no speculation.
     """
     out: list[dict] = []
-    for i in range(len(evals) - 1):
-        before, after = evals[i], evals[i + 1]
-        white_moved = (i % 2 == 0)
-        loss = (before - after) if white_moved else (after - before)
 
-        nag = None
-        if loss >= 200:
-            nag = 4
-        elif loss >= 100:
-            nag = 2
-        elif loss >= 50:
-            nag = 6
+    for i, move in enumerate(moves):
+        if i + 1 >= len(posinfo) or i + 1 >= len(fens):
+            break  # job was cut short (shutdown mid-game)
 
-        out.append({"ply": i, "nag": nag, "eval_cp": int(max(-10000, min(10000, after)))})
+        info, nxt = posinfo[i], posinfo[i + 1]
+        white_moved = i % 2 == 0
+        board = chess.Board(fens[i])
+        after = chess.Board(fens[i + 1])
+
+        pv = info["pv"]
+        best_uci = pv[0] if pv else None
+        played_is_best = best_uci == move.uci()
+
+        best_san = line = None
+        if best_uci and not played_is_best:
+            try:
+                best_san = board.san(chess.Move.from_uci(best_uci))
+                line = _san_line(fens[i], pv)
+            except Exception:
+                pass
+
+        wp_before = _win_percent(info["cp"])
+        wp_after = _win_percent(nxt["cp"])
+        drop = max(0.0, (wp_before - wp_after) if white_moved else (wp_after - wp_before))
+
+        # ----- classification -----
+        if after.is_checkmate():
+            cls, review = "best", "Checkmate."
+        elif i in book_plies:
+            cls, review = "book", "Book move — established opening theory."
+        elif played_is_best:
+            cls = "best"
+            mate_kept = _mate_for(nxt, white_moved)
+            review = (
+                f"Best move — keeps the forced mate in {mate_kept} on track."
+                if mate_kept is not None
+                else "Best move — the engine's top choice."
+            )
+        elif drop < 2:
+            cls, review = "excellent", "Excellent — practically as strong as the engine's first choice."
+        elif drop < 5:
+            cls, review = "good", "A solid move."
+        else:
+            cls = "inaccuracy" if drop < 10 else ("mistake" if drop < 20 else "blunder")
+            review = _explain_bad_move(
+                cls, move, board, after, fens, i, info, nxt, white_moved, best_san, line
+            )
+
+        out.append({
+            "ply": i,
+            "nag": NAG_BY_CLASS.get(cls),
+            "eval_cp": int(max(-10000, min(10000, nxt["cp"]))),
+            "best_uci": best_uci,
+            "classification": cls,
+            "review": review,
+        })
+
     return out
+
+
+def _explain_bad_move(
+    cls: str,
+    move,
+    board,
+    after,
+    fens: list[str],
+    i: int,
+    info: dict,
+    nxt: dict,
+    white_moved: bool,
+    best_san: str | None,
+    line: str | None,
+) -> str:
+    opener = {"inaccuracy": "An inaccuracy.", "mistake": "A mistake.", "blunder": "A blunder."}[cls]
+
+    # Cause, most specific first.
+    missed_mate = _mate_for(info, white_moved)
+    allowed_mate = _mate_for(nxt, not white_moved)
+    had_mate_against = _mate_for(info, not white_moved)  # already lost before the move
+
+    cause = None
+    if missed_mate is not None and _mate_for(nxt, white_moved) is None:
+        cause = f"There was a forced mate in {missed_mate}" + (
+            f" starting with {best_san}." if best_san else "."
+        )
+    elif allowed_mate is not None and had_mate_against is None:
+        cause = f"This allows a forced mate in {allowed_mate}."
+    elif after.is_stalemate():
+        cause = "Stalemate — the game is drawn despite the material."
+    elif cls != "inaccuracy" and nxt["pv"]:
+        # Hanging piece: the opponent's best reply simply captures what just moved.
+        reply = nxt["pv"][0]
+        if reply[2:4] == move.uci()[2:4]:
+            victim = after.piece_at(chess.parse_square(reply[2:4]))
+            if victim is not None:
+                try:
+                    reply_san = after.san(chess.Move.from_uci(reply))
+                    cause = (
+                        f"This leaves the {chess.piece_name(victim.piece_type)} on "
+                        f"{reply[2:4]} en prise — {reply_san} wins material."
+                    )
+                except Exception:
+                    pass
+
+    if cause is None:
+        both_normal = abs(info["cp"]) < 2000 and abs(nxt["cp"]) < 2000
+        if both_normal:
+            pawns = abs(info["cp"] - nxt["cp"]) / 100
+            cause = f"The evaluation swings by {pawns:.1f} pawns."
+        else:
+            cause = "The advantage slips away."
+
+    suggestion = ""
+    if best_san:
+        suggestion = f" Better was {best_san}" + (f" ({line})." if line and " " in line else ".")
+
+    return f"{opener} {cause}{suggestion}"
+
+
+def _summarize(annotations: list[dict]) -> dict:
+    """Per-player counts of each classification, for the review summary panel."""
+    counts: dict[str, dict[str, int]] = {"white": {}, "black": {}}
+    for a in annotations:
+        side = "white" if a["ply"] % 2 == 0 else "black"
+        cls = a["classification"]
+        counts[side][cls] = counts[side].get(cls, 0) + 1
+    return counts
 
 
 def _win_percent(cp: float) -> float:
@@ -368,21 +537,26 @@ def _accuracy_scores(evals: list[float]) -> dict:
 
 
 async def _store_annotations(
-    conn, game_id: int, user_id: int, annotations: list[dict], bests: list
+    conn, game_id: int, user_id: int, annotations: list[dict]
 ) -> None:
+    """Upsert review rows. `comment` is the user's own field - never touched."""
     async with conn.cursor() as cur:
         for ann in annotations:
-            ply = ann["ply"]
-            best_uci = bests[ply] if ply < len(bests) else None
             await cur.execute(
                 """
-                INSERT INTO annotations (game_id, user_id, ply, nag, eval_cp, best_uci)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO annotations
+                  (game_id, user_id, ply, nag, eval_cp, best_uci, classification, review)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (game_id, user_id, ply) DO UPDATE
                   SET nag = EXCLUDED.nag, eval_cp = EXCLUDED.eval_cp,
-                      best_uci = EXCLUDED.best_uci
+                      best_uci = EXCLUDED.best_uci,
+                      classification = EXCLUDED.classification,
+                      review = EXCLUDED.review
                 """,
-                (game_id, user_id, ply, ann["nag"], ann["eval_cp"], best_uci),
+                (
+                    game_id, user_id, ann["ply"], ann["nag"], ann["eval_cp"],
+                    ann["best_uci"], ann["classification"], ann["review"],
+                ),
             )
     await conn.commit()
 

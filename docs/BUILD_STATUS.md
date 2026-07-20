@@ -246,6 +246,29 @@
 
 ---
 
+### Game Review — chess.com-style (COMPLETE ✅)
+**Time invested:** ~3 hours (July 20, 2026)
+**What shipped:**
+
+1. **Full move classification** (migration 006: `annotations.classification`, `annotations.review`)
+   - Every move: book / best / excellent / good / inaccuracy / mistake / blunder
+   - Win%-drop thresholds matching the accuracy formula; book from opening_tree lookup
+   - `comment` column stays user-owned; engine writes to `review` — never clobbers notes
+2. **Rule-based "why" text per move** (no LLM, engine facts only)
+   - Allowed mate ("This allows a forced mate in N"), missed mate, stalemate throwaway,
+     hanging piece (opponent's best reply captures the moved piece), eval swings
+   - "Better was X (SAN line)" suggestion from the stored PV
+3. **Review UI** in the workspace
+   - Classification badges on every move (★ ✓ ?! ? ??, colored)
+   - Accuracy per player + move-quality count table
+   - Eval graph (win% area chart, blunder dots, click-to-seek, cursor line)
+   - Why-box for the current move with best-move hint
+4. **Verified E2E in the browser**: Scholar's Mate game → 3...Nf6?? shows
+   "A blunder. This allows a forced mate in 1. Better was g6 (g6 Qf3 Nf6 Ne2 Bg7)."
+   Accuracy white 90.6 / black 64.5; re-run flow (job poll) works.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder

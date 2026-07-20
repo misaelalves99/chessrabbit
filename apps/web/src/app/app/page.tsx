@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AnalysisBoard from "@/components/AnalysisBoard";
 import {
+  Annotation,
   api,
   ApiError,
   clearTokens,
@@ -20,6 +21,8 @@ export default function AppPage() {
   const [games, setGames] = useState<Game[]>([]);
   const [activePgn, setActivePgn] = useState<string | undefined>();
   const [activeLabel, setActiveLabel] = useState<string | undefined>();
+  const [activeId, setActiveId] = useState<number | undefined>();
+  const [activeAnnotations, setActiveAnnotations] = useState<Annotation[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [pgnText, setPgnText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -72,6 +75,8 @@ export default function AppPage() {
     try {
       const detail = await api.getGame(g.id);
       setActivePgn(detail.movetext);
+      setActiveId(g.id);
+      setActiveAnnotations(detail.annotations);
       setActiveLabel(
         `${g.white} vs ${g.black} · ${g.result}${g.event ? ` · ${g.event}` : ""}`
       );
@@ -247,7 +252,12 @@ export default function AppPage() {
 
         {/* Board workspace */}
         <div className="flex-1 overflow-auto">
-          <AnalysisBoard initialPgn={activePgn} gameLabel={activeLabel} />
+          <AnalysisBoard
+            initialPgn={activePgn}
+            gameLabel={activeLabel}
+            gameId={activeId}
+            initialAnnotations={activeAnnotations}
+          />
         </div>
       </div>
 

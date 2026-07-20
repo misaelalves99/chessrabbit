@@ -4,14 +4,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEngine, formatEval } from "@/hooks/useEngine";
-import { api, ExplorerMove } from "@/lib/api";
+import { Annotation, api, ExplorerMove, ReviewSummary } from "@/lib/api";
+import ReviewPanel, { CLASS_META } from "@/components/ReviewPanel";
 
 interface Props {
   initialPgn?: string;
   gameLabel?: string;
+  gameId?: number;
+  initialAnnotations?: Annotation[];
 }
 
-export default function AnalysisBoard({ initialPgn, gameLabel }: Props) {
+export default function AnalysisBoard({
+  initialPgn,
+  gameLabel,
+  gameId,
+  initialAnnotations,
+}: Props) {
   // `game` is the authoritative position; history drives the move list.
   const [game, setGame] = useState(() => new Chess());
   const [history, setHistory] = useState<string[]>([]);
@@ -21,8 +29,56 @@ export default function AnalysisBoard({ initialPgn, gameLabel }: Props) {
   const [explorerTotal, setExplorerTotal] = useState(0);
   const [explorerScope, setExplorerScope] = useState<"reference" | "mine">("reference");
   const [autoAnalyse, setAutoAnalyse] = useState(true);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const engine = useEngine();
+
+  // Adopt annotations (and stop any stale poll) when a different game loads
+  useEffect(() => {
+    setAnnotations(initialAnnotations ?? []);
+    setReviewSummary(null);
+    setReviewing(false);
+    if (pollRef.current) clearInterval(pollRef.current);
+  }, [gameId, initialAnnotations]);
+
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+  }, []);
+
+  const runReview = useCallback(async () => {
+    if (!gameId || reviewing) return;
+    setReviewing(true);
+    try {
+      const { job_id } = await api.analyseGame(gameId);
+      pollRef.current = setInterval(async () => {
+        try {
+          const job = await api.getJob(job_id);
+          if (job.status === "done" || job.status === "failed") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setReviewing(false);
+            if (job.status === "done" && job.result) {
+              setReviewSummary(job.result as ReviewSummary);
+              const detail = await api.getGame(gameId);
+              setAnnotations(detail.annotations);
+            }
+          }
+        } catch {
+          /* transient poll error - keep polling */
+        }
+      }, 2000);
+    } catch {
+      setReviewing(false);
+    }
+  }, [gameId, reviewing]);
+
+  const annByPly = useMemo(() => {
+    const m = new Map<number, Annotation>();
+    for (const a of annotations) if (a.classification) m.set(a.ply, a);
+    return m;
+  }, [annotations]);
 
   // Load an initial PGN once on mount
   useEffect(() => {
@@ -231,25 +287,45 @@ export default function AnalysisBoard({ initialPgn, gameLabel }: Props) {
           </ol>
         </section>
 
+        {/* Game review */}
+        <ReviewPanel
+          history={history}
+          annotations={annotations}
+          summary={reviewSummary}
+          cursor={cursor}
+          onSeek={setCursor}
+          reviewing={reviewing}
+          onRun={runReview}
+          canRun={gameId != null}
+        />
+
         {/* Move list */}
         <section className="bg-panelAlt rounded p-3 flex-1 overflow-auto max-h-64">
           <h3 className="font-semibold text-sm mb-2">Moves</h3>
           <div className="flex flex-wrap gap-x-2 gap-y-1 text-sm font-mono">
-            {history.map((san, i) => (
-              <span key={i} className="flex items-center gap-1">
-                {i % 2 === 0 && (
-                  <span className="text-muted">{Math.floor(i / 2) + 1}.</span>
-                )}
-                <button
-                  onClick={() => setCursor(i + 1)}
-                  className={`px-1 rounded hover:bg-white/10 ${
-                    cursor === i + 1 ? "bg-accent text-black" : ""
-                  }`}
-                >
-                  {san}
-                </button>
-              </span>
-            ))}
+            {history.map((san, i) => {
+              const cls = annByPly.get(i)?.classification;
+              const meta = cls ? CLASS_META[cls] : null;
+              return (
+                <span key={i} className="flex items-center gap-1">
+                  {i % 2 === 0 && (
+                    <span className="text-muted">{Math.floor(i / 2) + 1}.</span>
+                  )}
+                  <button
+                    onClick={() => setCursor(i + 1)}
+                    title={annByPly.get(i)?.review ?? undefined}
+                    className={`px-1 rounded hover:bg-white/10 ${
+                      cursor === i + 1 ? "bg-accent text-black" : meta?.color ?? ""
+                    }`}
+                  >
+                    {san}
+                    {meta?.glyph && (
+                      <span className="ml-0.5 text-[0.7em] align-super">{meta.glyph}</span>
+                    )}
+                  </button>
+                </span>
+              );
+            })}
             {history.length === 0 && (
               <span className="text-muted text-xs">
                 Drag a piece to start a line.

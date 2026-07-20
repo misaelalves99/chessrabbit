@@ -115,6 +115,9 @@ class AnnotationOut(BaseModel):
     nag: int | None
     comment: str | None
     eval_cp: int | None
+    best_uci: str | None = None
+    classification: str | None = None
+    review: str | None = None
 
     class Config:
         from_attributes = True

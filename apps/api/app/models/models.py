@@ -153,6 +153,8 @@ class Annotation(Base):
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     eval_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     best_uci: Mapped[str | None] = mapped_column(Text, nullable=True)
+    classification: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (UniqueConstraint("game_id", "user_id", "ply"),)
 
