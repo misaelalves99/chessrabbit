@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import chess
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select

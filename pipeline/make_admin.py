@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Grant admin to an account:  python pipeline/make_admin.py you@example.com"""
-import os, sys
+import os
+import sys
 import psycopg
 
 if len(sys.argv) != 2:

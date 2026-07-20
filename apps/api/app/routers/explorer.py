@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import chess
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.chess_utils import validate_fen, zobrist_of

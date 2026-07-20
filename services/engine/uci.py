@@ -69,7 +69,7 @@ def parse_info_line(line: str) -> EvalLine | None:
         return None
 
     tokens = line.split()
-    depth = seldepth = nodes = nps = None
+    depth = nodes = nps = None
     multipv = 1
     cp = mate = None
     pv: list[str] = []
@@ -79,15 +79,19 @@ def parse_info_line(line: str) -> EvalLine | None:
         tok = tokens[i]
 
         if tok == "depth" and i + 1 < len(tokens):
-            depth = int(tokens[i + 1]); i += 2
+            depth = int(tokens[i + 1])
+            i += 2
         elif tok == "seldepth" and i + 1 < len(tokens):
-            seldepth = int(tokens[i + 1]); i += 2
+            i += 2  # parsed but unused; consume so the value isn't misread as a keyword
         elif tok == "multipv" and i + 1 < len(tokens):
-            multipv = int(tokens[i + 1]); i += 2
+            multipv = int(tokens[i + 1])
+            i += 2
         elif tok == "nodes" and i + 1 < len(tokens):
-            nodes = int(tokens[i + 1]); i += 2
+            nodes = int(tokens[i + 1])
+            i += 2
         elif tok == "nps" and i + 1 < len(tokens):
-            nps = int(tokens[i + 1]); i += 2
+            nps = int(tokens[i + 1])
+            i += 2
         elif tok == "score" and i + 2 < len(tokens):
             kind, value = tokens[i + 1], tokens[i + 2]
             if kind == "cp":
