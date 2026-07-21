@@ -12,16 +12,36 @@ import { Annotation, Classification, ReviewSummary } from "@/lib/api";
 
 export const CLASS_META: Record<
   Classification,
-  { glyph: string; color: string; label: string }
+  { glyph: string; color: string; label: string; bg: string }
 > = {
-  book: { glyph: "▤", color: "text-muted", label: "Book" },
-  best: { glyph: "★", color: "text-accent", label: "Best" },
-  excellent: { glyph: "✓", color: "text-green-300", label: "Excellent" },
-  good: { glyph: "", color: "", label: "Good" },
-  inaccuracy: { glyph: "?!", color: "text-yellow-300", label: "Inaccuracy" },
-  mistake: { glyph: "?", color: "text-orange-400", label: "Mistake" },
-  blunder: { glyph: "??", color: "text-red-400", label: "Blunder" },
+  book: { glyph: "📖", color: "text-[#c8a878]", label: "Book", bg: "#a3865f" },
+  best: { glyph: "★", color: "text-accent", label: "Best", bg: "#7FA650" },
+  excellent: { glyph: "✓", color: "text-green-300", label: "Excellent", bg: "#81b64c" },
+  good: { glyph: "✓", color: "text-green-200", label: "Good", bg: "#7a9b57" },
+  inaccuracy: { glyph: "?!", color: "text-yellow-300", label: "Inaccuracy", bg: "#e0a63c" },
+  mistake: { glyph: "?", color: "text-orange-400", label: "Mistake", bg: "#e07a3c" },
+  blunder: { glyph: "??", color: "text-red-400", label: "Blunder", bg: "#d9534f" },
 };
+
+/** Chess.com-style headline: name the move and its verdict. */
+function headline(san: string, cls: Classification): string {
+  switch (cls) {
+    case "book":
+      return `${san} is a book move`;
+    case "best":
+      return `${san} is the best move`;
+    case "excellent":
+      return `${san} is excellent`;
+    case "good":
+      return `${san} is a good move`;
+    case "inaccuracy":
+      return `${san} is an inaccuracy`;
+    case "mistake":
+      return `${san} is a mistake`;
+    case "blunder":
+      return `${san} is a blunder`;
+  }
+}
 
 const DOT_FILL: Partial<Record<Classification, string>> = {
   inaccuracy: "#fde047",
@@ -223,22 +243,55 @@ export default function ReviewPanel({
       )}
 
       {current && currentMeta && (
-        <div className="text-xs bg-black/30 rounded p-2 mb-2">
-          <div className="flex items-center gap-2 mb-1">
-            <span className={`font-semibold ${currentMeta.color || "text-ink"}`}>
-              {currentMeta.glyph && `${currentMeta.glyph} `}
-              {currentMeta.label}
+        <div
+          className="rounded-lg p-3 mb-2 bg-black/30"
+          style={{ borderLeft: `4px solid ${currentMeta.bg}` }}
+        >
+          {/* Coach callout: badge + move name + eval */}
+          <div className="flex items-center gap-2">
+            <span
+              className="flex items-center justify-center rounded-full text-white shrink-0"
+              style={{
+                background: currentMeta.bg,
+                width: 24,
+                height: 24,
+                fontSize: currentMeta.glyph.length > 1 ? 11 : 14,
+                lineHeight: 1,
+              }}
+            >
+              {currentMeta.glyph}
             </span>
-            <span className="font-mono text-muted">
-              {Math.floor((cursor - 1) / 2) + 1}
-              {(cursor - 1) % 2 === 0 ? "." : "…"} {history[cursor - 1]}
+            <span className="font-semibold text-sm">
+              {headline(history[cursor - 1] ?? "", current.classification!)}
             </span>
-            <span className="font-mono ml-auto">{evalText(current.eval_cp)}</span>
+            <span className="font-mono text-xs ml-auto">
+              {evalText(current.eval_cp)}
+            </span>
           </div>
-          <p className="text-ink/90">{current.review}</p>
-          {bestSan && current.classification !== "best" && (
-            <p className="text-accent mt-1">Best: {bestSan}</p>
-          )}
+
+          <p className="text-xs text-ink/80 mt-2">{current.review}</p>
+          {bestSan &&
+            current.classification !== "best" &&
+            current.classification !== "book" && (
+              <p className="text-accent text-xs mt-1">Best was {bestSan}</p>
+            )}
+
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              className="btn text-xs"
+              onClick={() => onSeek(Math.max(0, cursor - 1))}
+              disabled={cursor <= 1}
+            >
+              ◀ Prev
+            </button>
+            <button
+              className="btn-primary text-xs flex-1"
+              onClick={() => onSeek(Math.min(N, cursor + 1))}
+              disabled={cursor >= N}
+            >
+              Next ▶
+            </button>
+          </div>
         </div>
       )}
 

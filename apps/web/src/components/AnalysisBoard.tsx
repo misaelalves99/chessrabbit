@@ -80,6 +80,47 @@ export default function AnalysisBoard({
     return m;
   }, [annotations]);
 
+  // from/to squares of every played move, for board highlighting + badges
+  const moveSquares = useMemo(() => {
+    const g = new Chess();
+    const out: { from: string; to: string }[] = [];
+    for (const san of history) {
+      try {
+        const m = g.move(san);
+        if (!m) break;
+        out.push({ from: m.from, to: m.to });
+      } catch {
+        break;
+      }
+    }
+    return out;
+  }, [history]);
+
+  // The move the cursor just played (ply cursor-1) and its review verdict
+  const reviewedMove = cursor > 0 ? moveSquares[cursor - 1] : undefined;
+  const reviewedClass =
+    cursor > 0 ? annByPly.get(cursor - 1)?.classification : undefined;
+
+  const highlightStyles = useMemo(() => {
+    if (!reviewedMove) return {};
+    return {
+      [reviewedMove.from]: { background: "rgba(127,166,80,0.28)" },
+      [reviewedMove.to]: { background: "rgba(127,166,80,0.42)" },
+    };
+  }, [reviewedMove]);
+
+  // Square -> top-left percentage within the board, respecting orientation.
+  const squarePct = useCallback(
+    (sq: string) => {
+      const file = sq.charCodeAt(0) - 97; // a=0..h=7
+      const rank = parseInt(sq[1], 10); // 1..8
+      const col = orientation === "white" ? file : 7 - file;
+      const row = orientation === "white" ? 8 - rank : rank - 1;
+      return { left: col * 12.5, top: row * 12.5 };
+    },
+    [orientation]
+  );
+
   // Load an initial PGN once on mount
   useEffect(() => {
     if (!initialPgn) return;
@@ -189,7 +230,7 @@ export default function AnalysisBoard({
         </div>
 
         <div>
-          <div className="w-[min(92vw,480px)]">
+          <div className="w-[min(92vw,480px)] relative">
             <Chessboard
               position={fen}
               onPieceDrop={onDrop}
@@ -197,7 +238,34 @@ export default function AnalysisBoard({
               customBoardStyle={{ borderRadius: "4px" }}
               customDarkSquareStyle={{ backgroundColor: "#739552" }}
               customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+              customSquareStyles={highlightStyles}
             />
+            {/* Classification badge on the destination square (chess.com-style) */}
+            {reviewedMove && reviewedClass && (
+              <div
+                className="absolute z-10 pointer-events-none"
+                style={{
+                  left: `${squarePct(reviewedMove.to).left + 12.5}%`,
+                  top: `${squarePct(reviewedMove.to).top}%`,
+                  transform: "translate(-50%, -50%)",
+                }}
+              >
+                <span
+                  className="flex items-center justify-center rounded-full text-white font-bold shadow-md ring-2 ring-black/20"
+                  style={{
+                    background: CLASS_META[reviewedClass].bg,
+                    width: "clamp(18px, 5.2vw, 26px)",
+                    height: "clamp(18px, 5.2vw, 26px)",
+                    fontSize:
+                      CLASS_META[reviewedClass].glyph.length > 1
+                        ? "clamp(9px, 2.4vw, 12px)"
+                        : "clamp(11px, 3vw, 15px)",
+                  }}
+                >
+                  {CLASS_META[reviewedClass].glyph}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Controls */}
