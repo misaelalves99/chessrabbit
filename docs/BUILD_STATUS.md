@@ -269,6 +269,29 @@
 
 ---
 
+### Reference database loaded from real Lichess games (COMPLETE ✅)
+**Date:** July 22, 2026
+**What shipped:**
+
+1. **API-based loader** (`pipeline/load_lichess_api.py`)
+   - Builds the reference DB from the public Lichess API instead of a 30GB+
+     monthly dump (host disk was too small): pulls rated standard games from
+     the top players in blitz/rapid/classical, filters to ≥2200 Elo, indexes
+     positions, rebuilds `opening_tree`. Resumable + rate-limit-polite.
+2. **Loaded: 52,707 reference games → 1,425,313 opening-tree positions**
+   (295 top players, ~96 min).
+3. **Verified via the live API** (the exact endpoints the UI calls):
+   - `/explorer` start position: e4 24,721 · d4 17,260 · Nf3 5,274, avg Elo ~2600
+   - Tree descends: after 1.e4 → Sicilian 9,195 / e5 5,510 / Caro 3,420 / French 2,834
+   - `/search/position`: 50 real games found for the Sicilian, with ECO codes
+
+### Leela Chess Zero — deferred (decision, not built)
+LCZero is GPL-3.0 (would run server-side like Stockfish), but it needs a GPU
+to be strong; on the CPU-only host it's weak and slow. Deferred until a GPU
+host exists — the engine service can select an engine per job when added.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder
