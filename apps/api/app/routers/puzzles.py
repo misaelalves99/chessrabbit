@@ -15,13 +15,15 @@ updated server-side from the reported outcome.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.models import Puzzle, PuzzleAttempt, User
-from app.schemas import PuzzleAttemptIn, PuzzleAttemptResult, PuzzleOut, PuzzleStats
+from app.schemas import (
+    PuzzleAttemptIn, PuzzleAttemptResult, PuzzleOut, PuzzleStats, PuzzleTheme,
+)
 
 router = APIRouter(prefix="/puzzles", tags=["puzzles"])
 
@@ -42,13 +44,39 @@ def _to_out(p: Puzzle) -> PuzzleOut:
     )
 
 
-@router.get("/next", response_model=PuzzleOut)
-async def next_puzzle(
-    theme: str | None = Query(default=None, max_length=40),
+@router.get("/themes", response_model=list[PuzzleTheme])
+async def list_themes(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """A puzzle near the player's rating they haven't seen, optionally by theme."""
+    """The most common themes across loaded puzzles, for the filter dropdown."""
+    rows = await db.execute(
+        text(
+            """
+            SELECT theme, COUNT(*) AS n
+            FROM (SELECT unnest(string_to_array(themes, ' ')) AS theme FROM puzzles) t
+            WHERE theme <> ''
+            GROUP BY theme
+            ORDER BY n DESC
+            LIMIT 25
+            """
+        )
+    )
+    return [PuzzleTheme(theme=r[0], count=r[1]) for r in rows.all()]
+
+
+@router.get("/next", response_model=PuzzleOut)
+async def next_puzzle(
+    theme: str | None = Query(default=None, max_length=40),
+    rating: int | None = Query(default=None, ge=RATING_FLOOR, le=RATING_CEIL),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    A puzzle the player hasn't seen, near a target rating (their own by
+    default; `rating` overrides it, e.g. for Rush difficulty ramps), optionally
+    filtered by theme.
+    """
     attempted = select(PuzzleAttempt.puzzle_id).where(PuzzleAttempt.user_id == user.id)
 
     def base():
@@ -57,7 +85,8 @@ async def next_puzzle(
             stmt = stmt.where(Puzzle.themes.like(f"%{theme}%"))
         return stmt
 
-    lo, hi = user.puzzle_rating - RATING_WINDOW, user.puzzle_rating + RATING_WINDOW
+    center = rating if rating is not None else user.puzzle_rating
+    lo, hi = center - RATING_WINDOW, center + RATING_WINDOW
 
     # 1) unseen, near rating, matching theme -> 2) unseen anywhere -> 3) anything
     for stmt in (

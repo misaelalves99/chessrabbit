@@ -49,6 +49,11 @@ export interface PuzzleStats {
   streak: number;
 }
 
+export interface PuzzleTheme {
+  theme: string;
+  count: number;
+}
+
 export interface Game {
   id: number;
   white: string;
@@ -350,8 +355,13 @@ export const api = {
 
   // ---- tactics puzzles ----
 
-  nextPuzzle: (theme?: string) =>
-    request<Puzzle>(`/puzzles/next${theme ? `?theme=${encodeURIComponent(theme)}` : ""}`),
+  nextPuzzle: (opts?: { theme?: string; rating?: number }) => {
+    const q = new URLSearchParams();
+    if (opts?.theme) q.set("theme", opts.theme);
+    if (opts?.rating != null) q.set("rating", String(opts.rating));
+    const qs = q.toString();
+    return request<Puzzle>(`/puzzles/next${qs ? `?${qs}` : ""}`);
+  },
 
   attemptPuzzle: (puzzle_id: number, solved: boolean) =>
     request<PuzzleAttemptResult>("/puzzles/attempt", {
@@ -360,6 +370,8 @@ export const api = {
     }),
 
   puzzleStats: () => request<PuzzleStats>("/puzzles/stats"),
+
+  puzzleThemes: () => request<PuzzleTheme[]>("/puzzles/themes"),
 
   // ---- connected accounts (auto-import) ----
 

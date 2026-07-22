@@ -313,8 +313,15 @@ host exists — the engine service can select an engine per job when added.
    reveals rating + themes + Lichess game link after each attempt, shows
    the player's tactics rating and streak. **Visible "🧩 Puzzles" nav
    entry** added to the app header and the trainer page.
-5. **Verified**: solve/fail/rating/stats end-to-end via the API (solving a
-   925 puzzle at rating 1200 gave +5; failing a 1480 gave -5; streak reset).
+5. **Theme filter + Puzzle Rush** (follow-up): a data-driven theme dropdown
+   (`GET /puzzles/themes` returns top themes with counts) filters Practice
+   puzzles; a Rush mode plays a 3-strikes sprint with difficulty ramping via
+   a `rating` override on `/puzzles/next` (900 + 25/solve), kept separate
+   from the tactics rating, best score in localStorage.
+6. **Verified**: solve/fail/rating/stats end-to-end via the API (solving a
+   925 puzzle at rating 1200 gave +5; failing a 1480 gave -5; streak reset);
+   theme filter returns matching puzzles; rating override centres difficulty
+   (900->798, 2000->2052); Rush start/HUD and theme dropdown confirmed in-browser.
    Note: the in-app browser pane's renderer was degraded during this session
    (react-chessboard rendered empty on every page, including the known-good
    /app board), so board-pixel interaction wasn't scriptable here; the page

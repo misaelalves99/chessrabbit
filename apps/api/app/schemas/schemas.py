@@ -198,6 +198,11 @@ class PuzzleStats(BaseModel):
     streak: int
 
 
+class PuzzleTheme(BaseModel):
+    theme: str
+    count: int
+
+
 # ---------- collections ----------
 
 class CollectionIn(BaseModel):
