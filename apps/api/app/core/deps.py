@@ -79,6 +79,30 @@ async def require_master(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+async def check_daily_session(user: User, kind: str, limit: int, label: str) -> None:
+    """
+    Redis-counted daily session gates (Puzzle Rush, intuition, Time Bank).
+    limit < 0 means unlimited. Raises 402 upgrade_required past the limit.
+    """
+    if limit < 0:
+        return
+    from app.core.redis_client import get_redis
+
+    key = f"{kind}:{user.id}:{date.today().isoformat()}"
+    redis = get_redis()
+    runs = await redis.incr(key)
+    await redis.expire(key, 172800)
+    if runs > limit:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "upgrade_required",
+                "message": f"The free plan includes {limit} {label} per day. "
+                           "Upgrade for unlimited training.",
+            },
+        )
+
+
 async def check_and_increment_usage(db: AsyncSession, user: User) -> int:
     """
     Atomically bump today's analysis counter, enforcing the free-tier daily cap.

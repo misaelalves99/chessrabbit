@@ -409,6 +409,35 @@ host exists — the engine service can select an engine per job when added.
 
 ---
 
+### Intuition + time-management trainers (COMPLETE ✅)
+**Date:** July 23, 2026
+**What shipped:**
+
+1. **🧠 Intuition — "Guess the master's move"** (`/train/intuition`):
+   ten random middlegame positions (ply 10-34) from reference games whose
+   strongest player is 2400+ (`GET /intuition/next`), 15-second countdown,
+   score on matching the master's move OR Stockfish's top choice (graded
+   via the existing /play/move at full strength). Session summary with
+   hits + average decision time.
+2. **⏱ Time management — "Time Bank" drill** (`/train/clock`): ten puzzles
+   against one 3:00 clock, difficulty hidden and deliberately mixed
+   (~5 easy / 5 hard targets). Wrong move ends the puzzle. End report:
+   per-puzzle time/difficulty/result table plus allocation advice
+   ("you spent 30s on a 900-rated puzzle..."). Runs outside the rating
+   system like Rush.
+3. **Quotas**: free tier gets 1 session/day of each (tiers gained
+   intuition_per_day + clock_per_day; generic check_daily_session helper in
+   deps.py; Puzzle Rush refactored onto it). `/puzzles/next` gained
+   `mode=practice|rush|clock` so session-gated modes are no longer blocked
+   by the practice puzzle quota - also fixes free-tier Rush after 5
+   practice puzzles. Pricing page lists the new line.
+4. **Verified live**: intuition session served a 2603-rated game position
+   with countdown + timeout reveal ("the master played Nd2"); Time Bank ran
+   with the global clock ticking; free tier's second session of each 402s;
+   rush-mode serve works with practice quota exhausted.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder

@@ -215,6 +215,20 @@ class PlayMoveOut(BaseModel):
     game_over: bool
 
 
+# ---------- intuition trainer ----------
+
+class IntuitionOut(BaseModel):
+    fen: str
+    master_uci: str
+    master_san: str
+    white: str
+    black: str
+    white_elo: int | None
+    black_elo: int | None
+    event: str
+    ply: int
+
+
 # ---------- opponent prep (master tier) ----------
 
 class PrepRequest(BaseModel):

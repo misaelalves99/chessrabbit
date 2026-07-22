@@ -150,9 +150,23 @@ export interface TierInfo {
   reviews_per_day: number;      // -1 = unlimited
   puzzles_per_day: number;
   rush_per_day: number;
+  intuition_per_day: number;
+  clock_per_day: number;
   openings_white: number;
   openings_black: number;
   opponent_prep: boolean;
+}
+
+export interface IntuitionPosition {
+  fen: string;
+  master_uci: string;
+  master_san: string;
+  white: string;
+  black: string;
+  white_elo: number | null;
+  black_elo: number | null;
+  event: string;
+  ply: number;
 }
 
 export interface PrepLine {
@@ -420,10 +434,11 @@ export const api = {
 
   // ---- tactics puzzles ----
 
-  nextPuzzle: (opts?: { theme?: string; rating?: number }) => {
+  nextPuzzle: (opts?: { theme?: string; rating?: number; mode?: "practice" | "rush" | "clock" }) => {
     const q = new URLSearchParams();
     if (opts?.theme) q.set("theme", opts.theme);
     if (opts?.rating != null) q.set("rating", String(opts.rating));
+    if (opts?.mode) q.set("mode", opts.mode);
     const qs = q.toString();
     return request<Puzzle>(`/puzzles/next${qs ? `?${qs}` : ""}`);
   },
@@ -439,6 +454,14 @@ export const api = {
   puzzleThemes: () => request<PuzzleTheme[]>("/puzzles/themes"),
 
   rushStart: () => request<{ ok: boolean }>("/puzzles/rush/start", { method: "POST" }),
+
+  clockStart: () => request<{ ok: boolean }>("/puzzles/clock/start", { method: "POST" }),
+
+  // ---- intuition trainer ----
+
+  intuitionStart: () => request<{ ok: boolean }>("/intuition/start", { method: "POST" }),
+
+  intuitionNext: () => request<IntuitionPosition>("/intuition/next"),
 
   // ---- play vs computer ----
 

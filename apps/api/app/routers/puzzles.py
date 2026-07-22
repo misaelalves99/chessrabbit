@@ -21,8 +21,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import get_current_user
-from app.core.redis_client import get_redis
+from app.core.deps import check_daily_session, get_current_user
 from app.core.tiers import UNLIMITED, tier_for
 from app.models import Puzzle, PuzzleAttempt, User
 from app.schemas import (
@@ -97,21 +96,15 @@ async def _check_puzzle_quota(db: AsyncSession, user: User) -> None:
 async def start_rush(user: User = Depends(get_current_user)):
     """Gate Puzzle Rush runs per day on the free tier."""
     tier = tier_for(user.plan)
-    if tier.rush_per_day == UNLIMITED:
-        return {"ok": True}
-    key = f"rush:{user.id}:{date.today().isoformat()}"
-    redis = get_redis()
-    runs = await redis.incr(key)
-    await redis.expire(key, 172800)
-    if runs > tier.rush_per_day:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "upgrade_required",
-                "message": f"The free plan includes {tier.rush_per_day} Puzzle Rush "
-                           "run per day. Upgrade for unlimited Rush.",
-            },
-        )
+    await check_daily_session(user, "rush", tier.rush_per_day, "Puzzle Rush run")
+    return {"ok": True}
+
+
+@router.post("/clock/start")
+async def start_clock_drill(user: User = Depends(get_current_user)):
+    """Gate Time Bank drill sessions per day on the free tier."""
+    tier = tier_for(user.plan)
+    await check_daily_session(user, "clock", tier.clock_per_day, "Time Bank drill")
     return {"ok": True}
 
 
@@ -119,6 +112,7 @@ async def start_rush(user: User = Depends(get_current_user)):
 async def next_puzzle(
     theme: str | None = Query(default=None, max_length=40),
     rating: int | None = Query(default=None, ge=RATING_FLOOR, le=RATING_CEIL),
+    mode: str = Query(default="practice", pattern="^(practice|rush|clock)$"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -126,8 +120,12 @@ async def next_puzzle(
     A puzzle the player hasn't seen, near a target rating (their own by
     default; `rating` overrides it, e.g. for Rush difficulty ramps), optionally
     filtered by theme.
+
+    The daily puzzle quota applies to practice only - rush and clock serves
+    are covered by their own once-a-day session gates.
     """
-    await _check_puzzle_quota(db, user)
+    if mode == "practice":
+        await _check_puzzle_quota(db, user)
     attempted = select(PuzzleAttempt.puzzle_id).where(PuzzleAttempt.user_id == user.id)
 
     def base():

@@ -30,6 +30,11 @@ function features(t: TierInfo): string[] {
       : `${t.rush_per_day} Puzzle Rush run / day`
   );
   f.push(
+    unlimited(t.intuition_per_day)
+      ? "Unlimited intuition + Time Bank training"
+      : `${t.intuition_per_day} intuition + ${t.clock_per_day} Time Bank session / day`
+  );
+  f.push(
     unlimited(t.openings_white)
       ? "Every opening, both colours"
       : `Top ${t.openings_white} White + top ${t.openings_black} Black openings`

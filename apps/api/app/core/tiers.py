@@ -28,6 +28,8 @@ class Tier:
     reviews_per_day: int        # UNLIMITED for paid tiers
     puzzles_per_day: int
     rush_per_day: int
+    intuition_per_day: int      # "guess the master's move" sessions
+    clock_per_day: int          # Time Bank drill sessions
     openings_white: int         # catalog ranks unlocked; UNLIMITED = all
     openings_black: int
     opponent_prep: bool
@@ -37,16 +39,19 @@ TIERS: dict[str, Tier] = {
     "free": Tier(
         id="free", label="Free", price_monthly=0,
         reviews_per_day=3, puzzles_per_day=5, rush_per_day=1,
+        intuition_per_day=1, clock_per_day=1,
         openings_white=3, openings_black=3, opponent_prep=False,
     ),
     "pro": Tier(
         id="pro", label="Pro", price_monthly=4.99,
         reviews_per_day=UNLIMITED, puzzles_per_day=UNLIMITED, rush_per_day=UNLIMITED,
+        intuition_per_day=UNLIMITED, clock_per_day=UNLIMITED,
         openings_white=12, openings_black=10, opponent_prep=False,
     ),
     "master": Tier(
         id="master", label="Master", price_monthly=9.99,
         reviews_per_day=UNLIMITED, puzzles_per_day=UNLIMITED, rush_per_day=UNLIMITED,
+        intuition_per_day=UNLIMITED, clock_per_day=UNLIMITED,
         openings_white=UNLIMITED, openings_black=UNLIMITED, opponent_prep=True,
     ),
 }
