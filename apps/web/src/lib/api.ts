@@ -131,6 +131,15 @@ export interface Repertoire {
   due_count: number;
 }
 
+export interface Opening {
+  id: string;
+  name: string;
+  color: "white" | "black";
+  eco: string;
+  description: string;
+  moves: string;
+}
+
 export interface TrainingCard {
   id: number;
   repertoire_id: number;
@@ -330,6 +339,8 @@ export const api = {
     }),
 
   listRepertoires: () => request<Repertoire[]>("/repertoires"),
+
+  listOpenings: () => request<Opening[]>("/openings"),
 
   deleteRepertoire: (id: number) =>
     request<void>(`/repertoires/${id}`, { method: "DELETE" }),

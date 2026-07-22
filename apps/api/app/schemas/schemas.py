@@ -215,6 +215,17 @@ class PlayMoveOut(BaseModel):
     game_over: bool
 
 
+# ---------- opening catalog ----------
+
+class OpeningOut(BaseModel):
+    id: str
+    name: str
+    color: str
+    eco: str
+    description: str
+    moves: str                # PGN with the opponent's alternatives in ( )
+
+
 # ---------- collections ----------
 
 class CollectionIn(BaseModel):

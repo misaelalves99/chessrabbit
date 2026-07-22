@@ -351,6 +351,26 @@ host exists — the engine service can select an engine per job when added.
 
 ---
 
+### Train a specific opening (COMPLETE ✅)
+**Date:** July 22, 2026
+**What shipped:**
+
+1. **Curated opening catalog** (`app/routers/openings.py`, `GET /openings`):
+   10 well-known openings (Italian, Ruy Lopez, Queen's Gambit, London,
+   English; Najdorf, French, Caro-Kann, KID, Scandinavian), each a PGN with
+   the opponent's alternatives in parentheses, tagged with colour + ECO +
+   a one-line description. Every PGN validated through the real
+   extract_repertoire (10/10 produce correct cards).
+2. **Frontend** (`/train`): a "📖 Openings" button reveals the catalog grouped
+   by colour; "Train" one-clicks it into a repertoire via the existing
+   createRepertoire -> extract_repertoire -> SM-2 pipeline.
+3. **Verified**: catalog renders; training the Italian created
+   "Italian Game · white · 7 cards" whose cards are exactly
+   `e4 Nf3 Bc4 c3 d3 d3 c3` (confirmed in the DB), flowing into the normal
+   review queue.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder

@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Chessboard } from "react-chessboard";
 import { useClickToMove } from "@/hooks/useClickToMove";
 import {
-  api, ApiError, Repertoire, TrainingCard, TrainingResult,
+  api, ApiError, Opening, Repertoire, TrainingCard, TrainingResult,
 } from "@/lib/api";
 
 const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -23,6 +23,9 @@ export default function TrainPage() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", color: "white" as "white" | "black", pgn: "" });
   const [error, setError] = useState<string | null>(null);
+  const [openings, setOpenings] = useState<Opening[]>([]);
+  const [showOpenings, setShowOpenings] = useState(false);
+  const [addingOpening, setAddingOpening] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -83,6 +86,28 @@ export default function TrainPage() {
       refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create repertoire");
+    }
+  }
+
+  function toggleOpenings() {
+    setShowOpenings((s) => !s);
+    setCreating(false);
+    if (openings.length === 0) {
+      api.listOpenings().then(setOpenings).catch(() => setError("Could not load openings"));
+    }
+  }
+
+  async function trainOpening(o: Opening) {
+    setAddingOpening(o.id);
+    setError(null);
+    try {
+      await api.createRepertoire(o.name, o.color, o.moves);
+      setShowOpenings(false);
+      refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not add that opening");
+    } finally {
+      setAddingOpening(null);
     }
   }
 
@@ -197,11 +222,59 @@ export default function TrainPage() {
               >
                 ⚡ Blunders
               </button>
-              <button className="btn text-xs" onClick={() => setCreating((c) => !c)}>
+              <button
+                className="btn text-xs"
+                title="Start a repertoire from a well-known opening"
+                onClick={toggleOpenings}
+              >
+                {showOpenings ? "Close" : "📖 Openings"}
+              </button>
+              <button className="btn text-xs" onClick={() => { setCreating((c) => !c); setShowOpenings(false); }}>
                 {creating ? "Cancel" : "+ New"}
               </button>
             </span>
           </div>
+
+          {showOpenings && (
+            <div className="bg-panelAlt p-3 rounded space-y-3 max-h-[28rem] overflow-auto">
+              <p className="text-xs text-muted">
+                Pick an opening to drill — it becomes a spaced-repetition
+                repertoire you review like any other.
+              </p>
+              {openings.length === 0 && (
+                <p className="text-xs text-muted">Loading…</p>
+              )}
+              {(["white", "black"] as const).map((side) => {
+                const list = openings.filter((o) => o.color === side);
+                if (list.length === 0) return null;
+                return (
+                  <div key={side}>
+                    <h3 className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">
+                      Play as {side}
+                    </h3>
+                    <ul className="space-y-1">
+                      {list.map((o) => (
+                        <li key={o.id} className="bg-white/5 rounded p-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-sm">{o.name}</span>
+                            <span className="text-[10px] text-muted font-mono">{o.eco}</span>
+                            <button
+                              className="btn-primary text-xs ml-auto"
+                              disabled={addingOpening !== null}
+                              onClick={() => trainOpening(o)}
+                            >
+                              {addingOpening === o.id ? "Adding…" : "Train"}
+                            </button>
+                          </div>
+                          <p className="text-xs text-muted mt-0.5">{o.description}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {creating && (
             <form onSubmit={createRep} className="space-y-2 bg-panelAlt p-3 rounded">
