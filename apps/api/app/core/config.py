@@ -47,10 +47,12 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT == "production"
 
     def max_depth_for(self, plan: str) -> int:
-        return self.PRO_MAX_DEPTH if plan == "pro" else self.FREE_MAX_DEPTH
+        from app.core.tiers import is_paid
+        return self.PRO_MAX_DEPTH if is_paid(plan) else self.FREE_MAX_DEPTH
 
     def max_multipv_for(self, plan: str) -> int:
-        return self.PRO_MAX_MULTIPV if plan == "pro" else self.FREE_MAX_MULTIPV
+        from app.core.tiers import is_paid
+        return self.PRO_MAX_MULTIPV if is_paid(plan) else self.FREE_MAX_MULTIPV
 
 
 @lru_cache

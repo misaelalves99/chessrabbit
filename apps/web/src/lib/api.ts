@@ -15,7 +15,7 @@ export interface Me {
   id: number;
   email: string;
   display_name: string;
-  plan: "free" | "pro";
+  plan: "free" | "pro" | "master";
   email_verified: boolean;
   analyses_today: number;
   daily_limit: number | null;
@@ -138,6 +138,37 @@ export interface Opening {
   eco: string;
   description: string;
   moves: string;
+  rank: number;
+  tier: "free" | "pro" | "master";
+  locked: boolean;
+}
+
+export interface TierInfo {
+  id: "free" | "pro" | "master";
+  label: string;
+  price_monthly: number;
+  reviews_per_day: number;      // -1 = unlimited
+  puzzles_per_day: number;
+  rush_per_day: number;
+  openings_white: number;
+  openings_black: number;
+  opponent_prep: boolean;
+}
+
+export interface PrepLine {
+  moves: string[];
+  count: number;
+  wins: number;
+  draws: number;
+  losses: number;
+}
+
+export interface PrepDossier {
+  username: string;
+  platform: string;
+  games_analyzed: number;
+  as_white: PrepLine[];
+  as_black: PrepLine[];
 }
 
 export interface TrainingCard {
@@ -342,6 +373,29 @@ export const api = {
 
   listOpenings: () => request<Opening[]>("/openings"),
 
+  trainOpening: (id: string) =>
+    request<Repertoire>(`/openings/${id}/train`, { method: "POST" }),
+
+  listTiers: () => request<TierInfo[]>("/tiers"),
+
+  // ---- opponent prep (master tier) ----
+
+  prepOpponent: (platform: "lichess" | "chesscom", username: string) =>
+    request<PrepDossier>("/prep/opponent", {
+      method: "POST",
+      body: JSON.stringify({ platform, username }),
+    }),
+
+  prepRepertoire: (
+    platform: "lichess" | "chesscom",
+    username: string,
+    my_color: "white" | "black",
+  ) =>
+    request<Repertoire>("/prep/opponent/repertoire", {
+      method: "POST",
+      body: JSON.stringify({ platform, username, my_color }),
+    }),
+
   deleteRepertoire: (id: number) =>
     request<void>(`/repertoires/${id}`, { method: "DELETE" }),
 
@@ -383,6 +437,8 @@ export const api = {
   puzzleStats: () => request<PuzzleStats>("/puzzles/stats"),
 
   puzzleThemes: () => request<PuzzleTheme[]>("/puzzles/themes"),
+
+  rushStart: () => request<{ ok: boolean }>("/puzzles/rush/start", { method: "POST" }),
 
   // ---- play vs computer ----
 

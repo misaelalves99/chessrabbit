@@ -20,7 +20,7 @@ import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useClickToMove } from "@/hooks/useClickToMove";
 import {
-  api, Puzzle, PuzzleAttemptResult, PuzzleStats, PuzzleTheme,
+  api, ApiError, Puzzle, PuzzleAttemptResult, PuzzleStats, PuzzleTheme,
 } from "@/lib/api";
 
 type Status =
@@ -63,6 +63,7 @@ export default function PuzzlesPage() {
   const [rush, setRush] = useState({ score: 0, strikes: 0 });
   const [rushResult, setRushResult] = useState<number | null>(null);
   const [rushBest, setRushBest] = useState(0);
+  const [limitMsg, setLimitMsg] = useState<string | null>(null);
 
   const loadPuzzle = useCallback(async (ratingOverride?: number) => {
     setStatus("loading");
@@ -92,10 +93,14 @@ export default function PuzzlesPage() {
         setStatus("solving");
       }, 600);
     } catch (e) {
-      setError(
-        (e as { message?: string })?.message ??
-          "Could not load a puzzle. Have puzzles been loaded on the server?"
-      );
+      if (e instanceof ApiError && e.code === "upgrade_required") {
+        setLimitMsg(e.message);
+      } else {
+        setError(
+          (e as { message?: string })?.message ??
+            "Could not load a puzzle. Have puzzles been loaded on the server?"
+        );
+      }
       setStatus("loading");
     }
   }, []);
@@ -205,7 +210,15 @@ export default function PuzzlesPage() {
     if (m === "practice") loadPuzzle();
   }
 
-  function startRush() {
+  async function startRush() {
+    try {
+      await api.rushStart();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "upgrade_required") {
+        setLimitMsg(e.message);
+        return;
+      }
+    }
     scoreRef.current = 0;
     strikesRef.current = 0;
     setRush({ score: 0, strikes: 0 });
@@ -327,6 +340,15 @@ export default function PuzzlesPage() {
           </select>
         )}
       </div>
+
+      {limitMsg && (
+        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 mb-4 flex items-center gap-3 flex-wrap">
+          <span className="text-sm">⏳ {limitMsg}</span>
+          <Link href="/pricing" className="btn-primary text-sm ml-auto">
+            See plans
+          </Link>
+        </div>
+      )}
 
       {error && (
         <p className="text-sm text-red-400 mb-3 cursor-pointer" onClick={() => setError(null)}>

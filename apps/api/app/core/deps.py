@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import decode_access_token
+from app.core.tiers import is_paid
 from app.models import UsageDaily, User
 
 
@@ -61,10 +62,19 @@ async def get_optional_user(
 
 
 async def require_pro(user: User = Depends(get_current_user)) -> User:
-    if user.plan != "pro":
+    if not is_paid(user.plan):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={"code": "upgrade_required", "message": "This feature requires a Pro subscription"},
+        )
+    return user
+
+
+async def require_master(user: User = Depends(get_current_user)) -> User:
+    if user.plan != "master":
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={"code": "upgrade_required", "message": "This feature requires the Master plan"},
         )
     return user
 
@@ -91,7 +101,7 @@ async def check_and_increment_usage(db: AsyncSession, user: User) -> int:
     count = result.scalar_one()
     await db.commit()
 
-    if user.plan != "pro" and count > settings.FREE_DAILY_ANALYSES:
+    if not is_paid(user.plan) and count > settings.FREE_DAILY_ANALYSES:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={

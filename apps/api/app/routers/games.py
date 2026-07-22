@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.chess_utils import parse_pgn, positions_of_game
+from app.core.tiers import is_paid
 from app.models import Annotation, Collection, CollectionGame, Game, GamePosition, User
 from app.schemas import (
     AnnotationIn, AnnotationOut, CollectionIn, CollectionOut,
@@ -72,7 +73,7 @@ async def import_games(
         )
 
     existing = await _count_user_games(db, user.id)
-    if user.plan != "pro" and existing + len(parsed) > settings.FREE_MAX_GAMES:
+    if not is_paid(user.plan) and existing + len(parsed) > settings.FREE_MAX_GAMES:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={

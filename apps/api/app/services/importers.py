@@ -188,9 +188,11 @@ async def _import_entries(
     count_res = await db.execute(
         select(func.count(Game.id)).where(Game.owner_id == user.id)
     )
+    from app.core.tiers import is_paid
+
     quota: int | None = (
         None
-        if user.plan == "pro"
+        if is_paid(user.plan)
         else max(0, settings.FREE_MAX_GAMES - count_res.scalar_one())
     )
 

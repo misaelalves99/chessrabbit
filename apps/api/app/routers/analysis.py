@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.chess_utils import validate_fen, zobrist_of
@@ -14,8 +14,34 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import check_and_increment_usage, get_current_user, require_pro
 from app.core.redis_client import get_redis
+from app.core.tiers import UNLIMITED, is_paid, tier_for
 from app.models import AnalysisCache, AnalysisJob, Game, User
 from app.schemas import AnalysePositionRequest, AnalysisJobOut
+
+
+async def _check_review_quota(db: AsyncSession, user: User) -> None:
+    """Free tier: a fixed number of full-game reviews per day."""
+    tier = tier_for(user.plan)
+    if tier.reviews_per_day == UNLIMITED:
+        return
+    used = (
+        await db.execute(
+            select(func.count(AnalysisJob.id)).where(
+                AnalysisJob.user_id == user.id,
+                AnalysisJob.kind == "full_game",
+                AnalysisJob.created_at >= date.today(),
+            )
+        )
+    ).scalar_one()
+    if used >= tier.reviews_per_day:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "upgrade_required",
+                "message": f"The free plan includes {tier.reviews_per_day} game reviews "
+                           "per day. Upgrade for unlimited reviews.",
+            },
+        )
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
@@ -75,7 +101,7 @@ async def analyse_position(
     await db.commit()
     await db.refresh(job)
 
-    queue = "q:pro" if user.plan == "pro" else "q:free"
+    queue = "q:pro" if is_paid(user.plan) else "q:free"
     await get_redis().rpush(
         queue,
         json.dumps({
@@ -90,10 +116,11 @@ async def analyse_position(
 @router.post("/game/{game_id}", response_model=AnalysisJobOut)
 async def analyse_full_game(
     game_id: int,
-    user: User = Depends(require_pro),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue a full-game annotation pass. Pro only (BLUEPRINT 9.3)."""
+    """Queue a full-game annotation pass. Free tier: limited per day."""
+    await _check_review_quota(db, user)
     game = await db.get(Game, game_id)
     if game is None or (game.owner_id is not None and game.owner_id != user.id):
         raise HTTPException(

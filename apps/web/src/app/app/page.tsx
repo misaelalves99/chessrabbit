@@ -57,10 +57,12 @@ export default function AppPage() {
   }, [router, loadGames]);
 
   async function billingAction() {
+    if (me?.plan === "free") {
+      router.push("/pricing");
+      return;
+    }
     try {
-      const { url } = me?.plan === "pro"
-        ? await api.billingPortal()
-        : await api.checkout("monthly");
+      const { url } = await api.billingPortal();
       window.location.href = url;
     } catch (err) {
       setNotice(
@@ -189,7 +191,7 @@ export default function AppPage() {
         </span>
         <div className="ml-auto flex gap-2">
           <button className="btn" onClick={billingAction}>
-            {me.plan === "pro" ? "Manage billing" : "★ Upgrade"}
+            {me.plan === "free" ? "★ Upgrade" : "Manage billing"}
           </button>
           <Link href="/train" className="btn">
             ♞ Train
@@ -199,6 +201,9 @@ export default function AppPage() {
           </Link>
           <Link href="/play" className="btn">
             ♟ Play
+          </Link>
+          <Link href="/prep" className="btn">
+            🎯 Prep
           </Link>
           <button className="btn" onClick={openAccounts}>
             ⇄ Accounts

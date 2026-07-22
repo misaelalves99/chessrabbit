@@ -26,13 +26,14 @@ from app.core.config import settings
 from app.core.db import SessionLocal
 from app.core.redis_client import get_redis
 from app.core.security import decode_access_token
+from app.core.tiers import is_paid
 from app.models import AnalysisCache, AnalysisJob, User
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 # Concurrent live analyses allowed per plan
-MAX_LIVE = {"free": 1, "pro": 3}
+MAX_LIVE = {"free": 1, "pro": 3, "master": 3}
 
 
 class ConnectionState:
@@ -154,7 +155,7 @@ async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
                 state.job_id = job_id
                 state.relay = asyncio.create_task(_relay(ws, job_id))
 
-                queue = "q:pro" if plan == "pro" else "q:free"
+                queue = "q:pro" if is_paid(plan) else "q:free"
                 await redis.rpush(queue, json.dumps({
                     "job_id": job_id, "kind": "position", "fen": fen,
                     "depth": depth, "multipv": multipv, "user_id": user_id,

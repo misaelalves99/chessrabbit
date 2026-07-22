@@ -5,7 +5,8 @@ import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEngine, formatEval } from "@/hooks/useEngine";
 import { useClickToMove } from "@/hooks/useClickToMove";
-import { Annotation, api, ExplorerMove, ExplorerScope, ReviewSummary } from "@/lib/api";
+import Link from "next/link";
+import { Annotation, api, ApiError, ExplorerMove, ExplorerScope, ReviewSummary } from "@/lib/api";
 import ReviewPanel, { CLASS_META } from "@/components/ReviewPanel";
 
 interface Props {
@@ -34,6 +35,7 @@ export default function AnalysisBoard({
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const engine = useEngine();
@@ -53,6 +55,7 @@ export default function AnalysisBoard({
   const runReview = useCallback(async () => {
     if (!gameId || reviewing) return;
     setReviewing(true);
+    setReviewNotice(null);
     try {
       const { job_id } = await api.analyseGame(gameId);
       pollRef.current = setInterval(async () => {
@@ -71,7 +74,10 @@ export default function AnalysisBoard({
           /* transient poll error - keep polling */
         }
       }, 2000);
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "upgrade_required") {
+        setReviewNotice(err.message);
+      }
       setReviewing(false);
     }
   }, [gameId, reviewing]);
@@ -363,6 +369,14 @@ export default function AnalysisBoard({
         </section>
 
         {/* Game review */}
+        {reviewNotice && (
+          <div className="bg-gold/10 border border-gold/30 rounded-lg px-3 py-2 text-xs flex items-center gap-2">
+            <span>⏳ {reviewNotice}</span>
+            <Link href="/pricing" className="text-gold underline ml-auto shrink-0">
+              See plans
+            </Link>
+          </div>
+        )}
         <ReviewPanel
           history={history}
           annotations={annotations}

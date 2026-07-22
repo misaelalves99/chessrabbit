@@ -19,6 +19,7 @@ from app.core.chess_utils import validate_fen
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.redis_client import get_redis
+from app.core.tiers import is_paid
 from app.models import AnalysisJob, User
 from app.schemas import PlayMoveIn, PlayMoveOut
 
@@ -87,7 +88,7 @@ async def play_move(
     # Subscribe BEFORE enqueueing so we can't miss the worker's publish.
     await pubsub.subscribe(f"eval:{job_id}")
     try:
-        queue = "q:pro" if user.plan == "pro" else "q:free"
+        queue = "q:pro" if is_paid(user.plan) else "q:free"
         await redis.rpush(
             queue,
             json.dumps({

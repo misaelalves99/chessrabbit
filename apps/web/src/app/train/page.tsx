@@ -101,7 +101,7 @@ export default function TrainPage() {
     setAddingOpening(o.id);
     setError(null);
     try {
-      await api.createRepertoire(o.name, o.color, o.moves);
+      await api.trainOpening(o.id);
       setShowOpenings(false);
       refresh();
     } catch (err) {
@@ -254,17 +254,30 @@ export default function TrainPage() {
                     </h3>
                     <ul className="space-y-1">
                       {list.map((o) => (
-                        <li key={o.id} className="bg-white/5 rounded p-2">
+                        <li
+                          key={o.id}
+                          className={`bg-white/5 rounded p-2 ${o.locked ? "opacity-70" : ""}`}
+                        >
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-sm">{o.name}</span>
                             <span className="text-[10px] text-muted font-mono">{o.eco}</span>
-                            <button
-                              className="btn-primary text-xs ml-auto"
-                              disabled={addingOpening !== null}
-                              onClick={() => trainOpening(o)}
-                            >
-                              {addingOpening === o.id ? "Adding…" : "Train"}
-                            </button>
+                            {o.locked ? (
+                              <Link
+                                href="/pricing"
+                                className="text-[10px] ml-auto rounded-full px-2 py-1 bg-gold/15 text-gold border border-gold/30 hover:bg-gold/25"
+                                title={`Unlocks with the ${o.tier} plan`}
+                              >
+                                🔒 {o.tier === "pro" ? "Pro" : "Master"}
+                              </Link>
+                            ) : (
+                              <button
+                                className="btn-primary text-xs ml-auto"
+                                disabled={addingOpening !== null}
+                                onClick={() => trainOpening(o)}
+                              >
+                                {addingOpening === o.id ? "Adding…" : "Train"}
+                              </button>
+                            )}
                           </div>
                           <p className="text-xs text-muted mt-0.5">{o.description}</p>
                         </li>

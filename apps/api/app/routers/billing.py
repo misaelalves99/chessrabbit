@@ -102,10 +102,12 @@ async def create_checkout_session(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "billing_not_configured", "message": "Price IDs are unset"},
         )
-    if user.plan == "pro":
+    from app.core.tiers import is_paid
+
+    if is_paid(user.plan):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "already_pro", "message": "You already have a Pro subscription"},
+            detail={"code": "already_pro", "message": "You already have a paid subscription"},
         )
 
     data = {

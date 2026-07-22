@@ -215,6 +215,35 @@ class PlayMoveOut(BaseModel):
     game_over: bool
 
 
+# ---------- opponent prep (master tier) ----------
+
+class PrepRequest(BaseModel):
+    platform: str = Field(pattern="^(lichess|chesscom)$")
+    username: str = Field(min_length=1, max_length=60)
+
+
+class PrepLine(BaseModel):
+    moves: list[str]
+    count: int
+    wins: int
+    draws: int
+    losses: int
+
+
+class PrepDossier(BaseModel):
+    username: str
+    platform: str
+    games_analyzed: int
+    as_white: list[PrepLine]
+    as_black: list[PrepLine]
+
+
+class PrepRepertoireIn(BaseModel):
+    platform: str = Field(pattern="^(lichess|chesscom)$")
+    username: str = Field(min_length=1, max_length=60)
+    my_color: str = Field(pattern="^(white|black)$")
+
+
 # ---------- opening catalog ----------
 
 class OpeningOut(BaseModel):
@@ -224,6 +253,9 @@ class OpeningOut(BaseModel):
     eco: str
     description: str
     moves: str                # PGN with the opponent's alternatives in ( )
+    rank: int                 # popularity order within the colour (1 = top)
+    tier: str                 # minimum plan that unlocks it
+    locked: bool = False      # computed for the requesting user
 
 
 # ---------- collections ----------

@@ -371,6 +371,44 @@ host exists — the engine service can select an engine per job when added.
 
 ---
 
+### Three-tier plans + opponent prep (COMPLETE ✅)
+**Date:** July 23, 2026
+**What shipped:**
+
+1. **Tiers** (`core/tiers.py`, single source; `GET /tiers` public):
+   - Free — 3 game reviews/day, 5 puzzles/day, 1 Puzzle Rush/day,
+     top 3 openings per colour
+   - Pro $4.99/mo — unlimited reviews/puzzles/Rush, top 12 White +
+     top 10 Black openings
+   - Master $9.99/mo — everything unlimited, all openings, opponent prep;
+     Leela listed as "coming with GPU hosting", never sold early
+   Migration 009 adds 'master' to users.plan. is_paid() centralises the old
+   scattered plan=="pro" checks (queues, depth caps, storage, billing).
+2. **Server-side enforcement** (402 upgrade_required everywhere):
+   review quota on full-game enqueue; puzzle quota on /puzzles/next;
+   Rush quota via POST /puzzles/rush/start (redis daily counter).
+   Full-game review is now available to free users (was pro-only).
+3. **Opening catalog grown to 26** (14 White, 12 Black), all validated
+   through extract_repertoire; ranked per colour; /openings returns
+   lock state; POST /openings/{id}/train enforces the lock server-side.
+4. **Engine**: Dockerfile now pulls the newest official Stockfish release -
+   the live worker logs "Engine ready: Stockfish 18". Debian package kept
+   as build-time fallback.
+5. **Opponent prep v1** (Master): POST /prep/opponent fetches an opponent's
+   recent chess.com/Lichess games and returns their top lines per colour
+   with W/D/L; POST /prep/opponent/repertoire builds a position-keyed
+   counter-repertoire whose replies come from the master reference DB.
+   /prep page with dossier UI; teaser + upgrade CTA for lower tiers.
+6. **Frontend**: /pricing (3 cards from /tiers), lock chips on openings,
+   limit-reached upgrade cards (puzzles, Rush, review), header
+   Upgrade -> /pricing, "🎯 Prep" nav entry.
+7. **Verified live**: free user = 3+3 openings unlocked, 20 lock chips,
+   puzzle limit card, rush 2nd start 402, review quota counted; pro = 12/10
+   openings, unlimited puzzles; master = all 26 + dossier + "4 positions
+   ready to drill" built in the UI against a real Lichess account.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder

@@ -14,12 +14,16 @@ updated server-side from the reported outcome.
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.redis_client import get_redis
+from app.core.tiers import UNLIMITED, tier_for
 from app.models import Puzzle, PuzzleAttempt, User
 from app.schemas import (
     PuzzleAttemptIn, PuzzleAttemptResult, PuzzleOut, PuzzleStats, PuzzleTheme,
@@ -65,6 +69,52 @@ async def list_themes(
     return [PuzzleTheme(theme=r[0], count=r[1]) for r in rows.all()]
 
 
+async def _check_puzzle_quota(db: AsyncSession, user: User) -> None:
+    """Free tier: a fixed number of new puzzles per day."""
+    tier = tier_for(user.plan)
+    if tier.puzzles_per_day == UNLIMITED:
+        return
+    used = (
+        await db.execute(
+            select(func.count(PuzzleAttempt.id)).where(
+                PuzzleAttempt.user_id == user.id,
+                PuzzleAttempt.created_at >= date.today(),
+            )
+        )
+    ).scalar_one()
+    if used >= tier.puzzles_per_day:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "upgrade_required",
+                "message": f"The free plan includes {tier.puzzles_per_day} puzzles "
+                           "per day. Upgrade for unlimited tactics.",
+            },
+        )
+
+
+@router.post("/rush/start")
+async def start_rush(user: User = Depends(get_current_user)):
+    """Gate Puzzle Rush runs per day on the free tier."""
+    tier = tier_for(user.plan)
+    if tier.rush_per_day == UNLIMITED:
+        return {"ok": True}
+    key = f"rush:{user.id}:{date.today().isoformat()}"
+    redis = get_redis()
+    runs = await redis.incr(key)
+    await redis.expire(key, 172800)
+    if runs > tier.rush_per_day:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "upgrade_required",
+                "message": f"The free plan includes {tier.rush_per_day} Puzzle Rush "
+                           "run per day. Upgrade for unlimited Rush.",
+            },
+        )
+    return {"ok": True}
+
+
 @router.get("/next", response_model=PuzzleOut)
 async def next_puzzle(
     theme: str | None = Query(default=None, max_length=40),
@@ -77,6 +127,7 @@ async def next_puzzle(
     default; `rating` overrides it, e.g. for Rush difficulty ramps), optionally
     filtered by theme.
     """
+    await _check_puzzle_quota(db, user)
     attempted = select(PuzzleAttempt.puzzle_id).where(PuzzleAttempt.user_id == user.id)
 
     def base():
