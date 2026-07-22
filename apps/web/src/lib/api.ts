@@ -373,6 +373,14 @@ export const api = {
 
   puzzleThemes: () => request<PuzzleTheme[]>("/puzzles/themes"),
 
+  // ---- play vs computer ----
+
+  playMove: (fen: string, level: number) =>
+    request<{ move: string | null; game_over: boolean }>("/play/move", {
+      method: "POST",
+      body: JSON.stringify({ fen, level }),
+    }),
+
   // ---- connected accounts (auto-import) ----
 
   listAccounts: () => request<ExternalAccount[]>("/me/accounts"),

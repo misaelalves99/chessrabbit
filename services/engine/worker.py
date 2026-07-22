@@ -195,6 +195,47 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
                 await cache_store(conn, zob, fen, pool.version, ev.depth, snapshot)
 
 
+async def handle_play_job(pool: EnginePool, redis, conn, job: dict) -> None:
+    """
+    Pick one move for a "play vs computer" position at a chosen strength.
+
+    Uses Stockfish's Skill Level (0-20) plus a short movetime, which produces
+    human-like weak play at low levels. Not cached: skill-limited play is
+    deliberately non-deterministic and must never pollute the analysis cache.
+    """
+    job_id = job["job_id"]
+    fen = job["fen"]
+    skill = max(0, min(20, int(job.get("skill", 20))))
+    movetime = max(50, min(5000, int(job.get("movetime", 500))))
+    channel = f"eval:{job_id}"
+
+    try:
+        board = chess.Board(fen)
+    except ValueError as exc:
+        await redis.publish(channel, json.dumps({"type": "error", "message": f"Invalid FEN: {exc}"}))
+        await set_job_status(conn, job_id, "failed", error=f"Invalid FEN: {exc}")
+        return
+
+    if board.is_game_over():
+        payload = {"type": "done", "best": None}
+        await redis.publish(channel, json.dumps(payload))
+        await set_job_status(conn, job_id, "done", result=payload)
+        return
+
+    await set_job_status(conn, job_id, "running")
+    move = None
+    async with pool.acquire() as engine:
+        async for item in engine.analyse(fen, multipv=1, movetime_ms=movetime, skill=skill):
+            if isinstance(item, dict) and item.get("type") == "bestmove":
+                move = item.get("move")
+                break
+
+    payload = {"type": "done", "best": move}
+    await redis.publish(channel, json.dumps(payload))
+    await set_job_status(conn, job_id, "done", result=payload)
+    log.info("job %s: play move %s (skill=%d, movetime=%dms)", job_id, move, skill, movetime)
+
+
 async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None:
     """
     Analyse every position in a game, tag mistakes, compute accuracy.
@@ -584,6 +625,8 @@ async def consume(consumer_id: int, queues: list[str], pool: EnginePool, redis) 
 
             if kind == "full_game":
                 await handle_full_game_job(pool, redis, conn, job)
+            elif kind == "play":
+                await handle_play_job(pool, redis, conn, job)
             else:
                 await handle_position_job(pool, redis, conn, job)
 

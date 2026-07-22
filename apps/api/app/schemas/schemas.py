@@ -203,6 +203,18 @@ class PuzzleTheme(BaseModel):
     count: int
 
 
+# ---------- play vs computer ----------
+
+class PlayMoveIn(BaseModel):
+    fen: str = Field(max_length=200)
+    level: int = Field(default=4, ge=1, le=8)
+
+
+class PlayMoveOut(BaseModel):
+    move: str | None          # UCI, or null if the game is already over
+    game_over: bool
+
+
 # ---------- collections ----------
 
 class CollectionIn(BaseModel):

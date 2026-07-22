@@ -232,6 +232,7 @@ class StockfishEngine:
         infinite: bool = False,
         stop_event: asyncio.Event | None = None,
         on_line: Callable[[EvalLine], None] | None = None,
+        skill: int = 20,
     ) -> AsyncIterator[EvalLine | dict]:
         """
         Stream evaluation lines for a position.
@@ -244,6 +245,9 @@ class StockfishEngine:
                 await self.restart()
 
             await self._send(f"setoption name MultiPV value {max(1, multipv)}")
+            # Always set Skill Level so a weakened play move never leaks into the
+            # next full-strength analysis on this reused engine (20 = full).
+            await self._send(f"setoption name Skill Level value {max(0, min(20, skill))}")
             await self._send("ucinewgame")
             await self._ready()
             await self._send(f"position fen {fen}")

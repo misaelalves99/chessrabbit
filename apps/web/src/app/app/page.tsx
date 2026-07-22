@@ -194,6 +194,9 @@ export default function AppPage() {
           <Link href="/train/puzzles" className="btn">
             🧩 Puzzles
           </Link>
+          <Link href="/play" className="btn">
+            ♟ Play
+          </Link>
           <button className="btn" onClick={openAccounts}>
             ⇄ Accounts
           </button>

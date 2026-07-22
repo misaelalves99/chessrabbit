@@ -329,6 +329,28 @@ host exists — the engine service can select an engine per job when added.
 
 ---
 
+### Play vs Stockfish (COMPLETE ✅)
+**Date:** July 22, 2026
+**What shipped:**
+
+1. **Engine**: `uci.analyse` gained a `skill` param (sets Stockfish Skill
+   Level 0-20, default 20 so weakened play never leaks into analysis). New
+   `handle_play_job` returns one move at a given skill + short movetime
+   (uncached, since skill-limited play is non-deterministic).
+2. **API**: `POST /play/move` {fen, level 1-8} enqueues a play job, awaits the
+   move on the job's Redis channel, returns it. Levels map to Skill/movetime
+   (L1: skill 0/100ms … L8: skill 20/1200ms). Migration 008 allows kind=play.
+3. **Frontend** `/play`: pick colour (white/black/random) + level, play a full
+   game vs the engine by drag or click-to-move; chess.js enforces legality and
+   detects mate/stalemate/draws; resign + new game; move list. "♟ Play" nav
+   entry in the app header.
+4. **Verified**: API returns legal moves at every level, stronger at high
+   levels, and {move:null, game_over:true} on a finished position. In-browser:
+   starting as Black, the engine opened 1.e4, it rendered in the move list,
+   turn switched to the user - no console errors.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder
