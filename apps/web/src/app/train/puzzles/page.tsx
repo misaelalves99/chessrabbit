@@ -22,7 +22,9 @@ import {
   api, Puzzle, PuzzleAttemptResult, PuzzleStats, PuzzleTheme,
 } from "@/lib/api";
 
-type Status = "loading" | "intro" | "solving" | "opponent" | "solved" | "failed";
+type Status =
+  | "loading" | "intro" | "solving" | "opponent"
+  | "solved" | "failed" | "showing" | "shown";
 type Mode = "practice" | "rush";
 
 const RUSH_STRIKES = 3;
@@ -40,6 +42,7 @@ export default function PuzzlesPage() {
   const themeRef = useRef("");
   const scoreRef = useRef(0);
   const strikesRef = useRef(0);
+  const retryingRef = useRef(false);  // replaying a failed puzzle: don't re-record
 
   const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
   const [fen, setFen] = useState(game.current.fen());
@@ -52,6 +55,7 @@ export default function PuzzlesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<Mode>("practice");
+  const [retrying, setRetrying] = useState(false);
   const [theme, setTheme] = useState("");
   const [themes, setThemes] = useState<PuzzleTheme[]>([]);
   const [rushActive, setRushActive] = useState(false);
@@ -63,6 +67,8 @@ export default function PuzzlesPage() {
     setStatus("loading");
     setFeedback(null);
     setExpectedSan(null);
+    setRetrying(false);
+    retryingRef.current = false;
     try {
       const p = await api.nextPuzzle({
         theme: modeRef.current === "practice" && themeRef.current ? themeRef.current : undefined,
@@ -122,8 +128,10 @@ export default function PuzzlesPage() {
         return;
       }
 
-      // Practice: record the attempt and nudge the rating.
+      // Practice: record the attempt and nudge the rating - but a retry of an
+      // already-failed puzzle is for learning only, so it never re-records.
       setStatus(solved ? "solved" : "failed");
+      if (retryingRef.current) return;
       try {
         const res = await api.attemptPuzzle(puzzleRef.current.id, solved);
         setFeedback(res);
@@ -205,6 +213,46 @@ export default function PuzzlesPage() {
     themeRef.current = t;
     setTheme(t);
     loadPuzzle();
+  }
+
+  // Rewind to the start (just after the setup move) so the same puzzle can be
+  // attempted again. Marked as a retry so it doesn't touch the rating again.
+  function resetToStart(p: Puzzle) {
+    const g = new Chess(p.fen);
+    g.move(uciToMove(p.moves[0]));
+    game.current = g;
+    setFen(g.fen());
+    setSolIdx(1);
+    setFeedback(null);
+    setExpectedSan(null);
+  }
+
+  function retryPuzzle() {
+    if (!puzzleRef.current) return;
+    resetToStart(puzzleRef.current);
+    retryingRef.current = true;
+    setRetrying(true);
+    setStatus("solving");
+  }
+
+  // Play the full winning line out on the board, move by move.
+  function showSolution() {
+    const p = puzzleRef.current;
+    if (!p) return;
+    resetToStart(p);
+    setStatus("showing");
+    let i = 1;
+    const step = () => {
+      if (i >= p.moves.length) {
+        setStatus("shown");
+        return;
+      }
+      game.current.move(uciToMove(p.moves[i]));
+      setFen(game.current.fen());
+      i += 1;
+      setTimeout(step, 700);
+    };
+    setTimeout(step, 500);
   }
 
   const solving = status === "solving" || status === "opponent" || status === "intro";
@@ -350,30 +398,63 @@ export default function PuzzlesPage() {
             </div>
           )}
 
-          {/* Practice verdicts */}
-          {mode === "practice" && status === "solved" && feedback && (
+          {/* Practice: solved (celebration; no rating line on a retry) */}
+          {mode === "practice" && status === "solved" && (
             <div className="bg-accent/20 rounded p-4">
               <p className="text-lg font-semibold text-accent">✓ Solved!</p>
-              <RatingLine feedback={feedback} />
+              {feedback ? (
+                <RatingLine feedback={feedback} />
+              ) : (
+                retrying && (
+                  <p className="text-xs text-muted mt-1">Retry — rating unchanged.</p>
+                )
+              )}
             </div>
           )}
-          {mode === "practice" && status === "failed" && feedback && (
-            <div className="bg-red-500/20 rounded p-4">
+
+          {/* Practice: failed -> reveal the move, offer retry / show solution */}
+          {mode === "practice" && status === "failed" && (
+            <div className="bg-red-500/20 rounded p-4 space-y-2">
               <p className="text-lg font-semibold text-red-300">✗ Not quite</p>
               {expectedSan && (
-                <p className="text-sm mt-1">
+                <p className="text-sm">
                   The move was <span className="font-mono font-bold">{expectedSan}</span>.
                 </p>
               )}
-              <RatingLine feedback={feedback} />
+              {feedback && <RatingLine feedback={feedback} />}
+              <div className="flex gap-2">
+                <button className="btn flex-1" onClick={retryPuzzle}>↺ Retry</button>
+                <button className="btn flex-1" onClick={showSolution}>👁 Show solution</button>
+              </div>
             </div>
           )}
-          {mode === "practice" && (status === "solved" || status === "failed") && (
-            <button className="btn-primary w-full" onClick={() => loadPuzzle()} autoFocus>
-              Next puzzle →
-            </button>
+
+          {/* Practice: solution playback */}
+          {mode === "practice" && status === "showing" && (
+            <div className="bg-panelAlt rounded p-4">
+              <p className="text-lg font-semibold">Solution</p>
+              <p className="text-xs text-muted mt-1 animate-pulse">
+                Playing the winning line…
+              </p>
+            </div>
           )}
-          {mode === "practice" && puzzle && (status === "solved" || status === "failed") && (
+          {mode === "practice" && status === "shown" && (
+            <div className="bg-panelAlt rounded p-4 space-y-2">
+              <p className="text-lg font-semibold">That&apos;s the solution</p>
+              <button className="btn w-full" onClick={retryPuzzle}>↺ Try it yourself</button>
+            </div>
+          )}
+
+          {/* Next puzzle - from any terminal state */}
+          {mode === "practice" &&
+            (status === "solved" || status === "failed" || status === "shown") && (
+              <button className="btn-primary w-full" onClick={() => loadPuzzle()}>
+                Next puzzle →
+              </button>
+            )}
+          {mode === "practice" &&
+            puzzle &&
+            (status === "solved" || status === "failed" || status === "shown") && (
             <div className="bg-panelAlt rounded p-3 text-xs text-muted space-y-1">
               <div>Puzzle rating <span className="text-ink font-mono">{puzzle.rating}</span></div>
               {puzzle.themes.length > 0 && (
