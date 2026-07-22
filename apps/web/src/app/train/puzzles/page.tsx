@@ -268,7 +268,7 @@ export default function PuzzlesPage() {
       <header className="flex items-center gap-3 mb-4 flex-wrap">
         <Link href="/app" className="btn">← Board</Link>
         <Link href="/train" className="btn">♞ Repertoire</Link>
-        <h1 className="text-xl font-bold">🧩 Puzzles</h1>
+        <h1 className="font-display text-xl font-bold">🧩 Puzzles</h1>
         {mode === "practice" && stats && (
           <span className="ml-auto flex items-center gap-4 text-sm">
             <span>
@@ -344,8 +344,8 @@ export default function PuzzlesPage() {
               boardOrientation={orientation}
               arePiecesDraggable={status === "solving"}
               customBoardStyle={{ borderRadius: "4px" }}
-              customDarkSquareStyle={{ backgroundColor: "#739552" }}
-              customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+              customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
+              customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
               customSquareStyles={squareStyles}
             />
           </div>

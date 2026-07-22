@@ -116,7 +116,7 @@ export default function TrainPage() {
       <header className="flex items-center gap-4 mb-4">
         <Link href="/app" className="btn">← Board</Link>
         <Link href="/train/puzzles" className="btn">🧩 Puzzles</Link>
-        <h1 className="text-xl font-bold">Repertoire Trainer</h1>
+        <h1 className="font-display text-xl font-bold">Repertoire Trainer</h1>
         <span className="ml-auto text-sm text-muted">
           Session: <span className="text-accent">{session.right} ✓</span>{" "}
           <span className="text-red-400">{session.wrong} ✗</span>
@@ -145,8 +145,8 @@ export default function TrainPage() {
                   onSquareClick={onSquareClick}
                   boardOrientation={card.color}
                   arePiecesDraggable={!feedback}
-                  customDarkSquareStyle={{ backgroundColor: "#739552" }}
-                  customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+                  customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
+                  customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
                   customSquareStyles={squareStyles}
                 />
               </div>

@@ -166,15 +166,18 @@ export default function AppPage() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Top bar */}
-      <header className="flex items-center gap-4 px-4 py-2 bg-panelAlt border-b border-white/10">
+      <header className="sticky top-0 z-40 flex items-center gap-4 px-4 py-2 bg-panel/70 backdrop-blur-md border-b border-white/5">
         <button
           className="btn lg:hidden"
           onClick={() => setSidebarOpen((s) => !s)}
         >
           ☰
         </button>
-        <span className="font-bold">
-          Chess<span className="text-accent">Rabbit</span>
+        <span className="font-display font-bold text-lg">
+          Chess
+          <span className="bg-gradient-to-r from-accent to-accent2 bg-clip-text text-transparent">
+            Rabbit
+          </span>
         </span>
         <span className="text-xs text-muted">
           {me.display_name} ·{" "}
@@ -221,7 +224,7 @@ export default function AppPage() {
       <div className="flex flex-1">
         {/* Games sidebar */}
         {sidebarOpen && (
-          <aside className="w-72 shrink-0 border-r border-white/10 bg-panel overflow-auto max-h-[calc(100vh-49px)]">
+          <aside className="w-72 shrink-0 border-r border-white/5 bg-panel/60 overflow-auto max-h-[calc(100vh-49px)]">
             <div className="p-3">
               <h2 className="text-sm font-semibold mb-2">
                 My games{" "}

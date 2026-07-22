@@ -15,7 +15,7 @@ export const CLASS_META: Record<
   { glyph: string; color: string; label: string; bg: string }
 > = {
   book: { glyph: "📖", color: "text-[#c8a878]", label: "Book", bg: "#a3865f" },
-  best: { glyph: "★", color: "text-accent", label: "Best", bg: "#7FA650" },
+  best: { glyph: "★", color: "text-accent", label: "Best", bg: "#818CF8" },
   excellent: { glyph: "✓", color: "text-green-300", label: "Excellent", bg: "#81b64c" },
   good: { glyph: "✓", color: "text-green-200", label: "Good", bg: "#7a9b57" },
   inaccuracy: { glyph: "?!", color: "text-yellow-300", label: "Inaccuracy", bg: "#e0a63c" },
@@ -224,10 +224,10 @@ export default function ReviewPanel({
           onPointerDown={seekFromPointer}
           onPointerMove={(e) => e.buttons === 1 && seekFromPointer(e)}
         >
-          <path d={graph.path} fill="#E8E6E3" opacity={0.9} />
-          <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="#9B9894" strokeWidth={0.5} strokeDasharray="2 3" />
+          <path d={graph.path} fill="#E3E6F2" opacity={0.9} />
+          <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="#8E96B3" strokeWidth={0.5} strokeDasharray="2 3" />
           {graph.dots.map((d) => (
-            <circle key={d.ply} cx={d.x} cy={d.y} r={3} fill={d.fill} stroke="#262421" strokeWidth={1} />
+            <circle key={d.ply} cx={d.x} cy={d.y} r={3} fill={d.fill} stroke="#191C2B" strokeWidth={1} />
           ))}
           {cursor > 0 && (
             <line
@@ -235,7 +235,7 @@ export default function ReviewPanel({
               y1={0}
               x2={(cursor / N) * W}
               y2={H}
-              stroke="#7FA650"
+              stroke="#818CF8"
               strokeWidth={1.5}
             />
           )}

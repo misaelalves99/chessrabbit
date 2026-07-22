@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-panel text-ink antialiased">{children}</body>
+      <body className="text-ink antialiased font-sans">{children}</body>
     </html>
   );
 }

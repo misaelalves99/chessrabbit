@@ -106,8 +106,8 @@ export default function AnalysisBoard({
   const highlightStyles = useMemo(() => {
     if (!reviewedMove) return {};
     return {
-      [reviewedMove.from]: { background: "rgba(127,166,80,0.28)" },
-      [reviewedMove.to]: { background: "rgba(127,166,80,0.42)" },
+      [reviewedMove.from]: { background: "rgba(129,140,248,0.30)" },
+      [reviewedMove.to]: { background: "rgba(129,140,248,0.45)" },
     };
   }, [reviewedMove]);
 
@@ -224,7 +224,7 @@ export default function AnalysisBoard({
   }, [best]);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 p-4 bg-panel min-h-screen text-ink">
+    <div className="flex flex-col lg:flex-row gap-4 p-4 min-h-screen text-ink">
       {/* ---------- Board column ---------- */}
       <div className="flex gap-2">
         {/* Eval bar */}
@@ -243,8 +243,8 @@ export default function AnalysisBoard({
               onSquareClick={onSquareClick}
               boardOrientation={orientation}
               customBoardStyle={{ borderRadius: "4px" }}
-              customDarkSquareStyle={{ backgroundColor: "#739552" }}
-              customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+              customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
+              customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
               customSquareStyles={{ ...highlightStyles, ...squareStyles }}
             />
             {/* Classification badge on the destination square (chess.com-style) */}
