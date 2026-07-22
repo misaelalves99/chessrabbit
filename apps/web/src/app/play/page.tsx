@@ -26,6 +26,8 @@ function uciToMove(uci: string) {
   return { from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4) || "q" };
 }
 
+const HINT_STYLE = { background: "rgba(255, 213, 79, 0.55)" };
+
 export default function PlayPage() {
   const router = useRouter();
   const game = useRef(new Chess());
@@ -39,6 +41,8 @@ export default function PlayPage() {
   const [thinking, setThinking] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hint, setHint] = useState<{ from: string; to: string; san: string } | null>(null);
+  const [hinting, setHinting] = useState(false);
 
   // Setup form
   const [color, setColor] = useState<Color | "random">("white");
@@ -47,6 +51,11 @@ export default function PlayPage() {
   useEffect(() => {
     if (!getAccessToken()) router.push("/login");
   }, [router]);
+
+  // A hint belongs to one position - drop it as soon as the board changes.
+  useEffect(() => {
+    setHint(null);
+  }, [fen]);
 
   const sync = useCallback(() => {
     setFen(game.current.fen());
@@ -111,9 +120,34 @@ export default function PlayPage() {
     [status, thinking, sync, finishIfOver, requestEngineMove],
   );
 
+  // A hint is the engine's best move (full strength) for the current position.
+  const requestHint = useCallback(async () => {
+    if (hinting) return;
+    const atFen = game.current.fen();
+    setHinting(true);
+    try {
+      const res = await api.playMove(atFen, 8);
+      if (res.move && game.current.fen() === atFen) {
+        const probe = new Chess(atFen);
+        const mv = probe.move(uciToMove(res.move));
+        setHint({
+          from: res.move.slice(0, 2),
+          to: res.move.slice(2, 4),
+          san: mv?.san ?? res.move,
+        });
+      }
+    } catch {
+      setError("Could not get a hint right now.");
+    } finally {
+      setHinting(false);
+    }
+  }, [hinting]);
+
   const isUserTurn = game.current.turn() === (orientation === "white" ? "w" : "b");
   const canMove = status === "playing" && !thinking && isUserTurn;
   const { onSquareClick, squareStyles } = useClickToMove(fen, onMove, canMove);
+
+  const hintStyles = hint ? { [hint.from]: HINT_STYLE, [hint.to]: HINT_STYLE } : {};
 
   function startGame() {
     const c: Color = color === "random" ? (Math.random() < 0.5 ? "white" : "black") : color;
@@ -172,7 +206,7 @@ export default function PlayPage() {
             customBoardStyle={{ borderRadius: "4px" }}
             customDarkSquareStyle={{ backgroundColor: "#739552" }}
             customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
-            customSquareStyles={squareStyles}
+            customSquareStyles={{ ...hintStyles, ...squareStyles }}
           />
         </div>
 
@@ -229,16 +263,28 @@ export default function PlayPage() {
               ) : thinking ? (
                 <p className="text-lg font-semibold animate-pulse">Stockfish is thinking…</p>
               ) : (
-                <p className="text-lg font-semibold flex items-center gap-2">
-                  <span
-                    className={`w-4 h-4 rounded-full border border-white/40 ${
-                      orientation === "white" ? "bg-white" : "bg-black"
-                    }`}
-                  />
-                  Your move
-                </p>
+                <div>
+                  <p className="text-lg font-semibold flex items-center gap-2">
+                    <span
+                      className={`w-4 h-4 rounded-full border border-white/40 ${
+                        orientation === "white" ? "bg-white" : "bg-black"
+                      }`}
+                    />
+                    Your move
+                  </p>
+                  {hint && (
+                    <p className="text-sm text-yellow-300 mt-1">
+                      Hint: <span className="font-mono font-semibold">{hint.san}</span>
+                    </p>
+                  )}
+                </div>
               )}
               <div className="flex gap-2 mt-3">
+                {canMove && (
+                  <button className="btn flex-1" onClick={requestHint} disabled={hinting}>
+                    {hinting ? "…" : "💡 Hint"}
+                  </button>
+                )}
                 {status === "playing" && (
                   <button className="btn flex-1" onClick={resign}>
                     Resign
