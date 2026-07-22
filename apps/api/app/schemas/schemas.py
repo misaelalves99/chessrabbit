@@ -48,6 +48,7 @@ class UserOut(BaseModel):
     plan: str
     email_verified: bool
     created_at: datetime
+    puzzle_rating: int = 1200
 
     class Config:
         from_attributes = True
@@ -163,6 +164,38 @@ class ExplorerOut(BaseModel):
     fen: str
     total_games: int
     moves: list[ExplorerMove]
+
+
+# ---------- puzzles ----------
+
+class PuzzleOut(BaseModel):
+    id: int
+    lichess_id: str
+    fen: str
+    moves: list[str]           # UCI solution line; moves[0] is the setup move
+    rating: int
+    themes: list[str]
+    game_url: str | None = None
+
+
+class PuzzleAttemptIn(BaseModel):
+    puzzle_id: int
+    solved: bool
+
+
+class PuzzleAttemptResult(BaseModel):
+    solved: bool
+    rating_before: int
+    rating_after: int
+    delta: int
+    puzzle_rating: int
+
+
+class PuzzleStats(BaseModel):
+    puzzle_rating: int
+    solved: int
+    attempted: int
+    streak: int
 
 
 # ---------- collections ----------

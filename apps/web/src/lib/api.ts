@@ -21,6 +21,32 @@ export interface Me {
   daily_limit: number | null;
   max_depth: number;
   max_multipv: number;
+  puzzle_rating: number;
+}
+
+export interface Puzzle {
+  id: number;
+  lichess_id: string;
+  fen: string;
+  moves: string[];
+  rating: number;
+  themes: string[];
+  game_url: string | null;
+}
+
+export interface PuzzleAttemptResult {
+  solved: boolean;
+  rating_before: number;
+  rating_after: number;
+  delta: number;
+  puzzle_rating: number;
+}
+
+export interface PuzzleStats {
+  puzzle_rating: number;
+  solved: number;
+  attempted: number;
+  streak: number;
 }
 
 export interface Game {
@@ -321,6 +347,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ card_id, answer_uci }),
     }),
+
+  // ---- tactics puzzles ----
+
+  nextPuzzle: (theme?: string) =>
+    request<Puzzle>(`/puzzles/next${theme ? `?theme=${encodeURIComponent(theme)}` : ""}`),
+
+  attemptPuzzle: (puzzle_id: number, solved: boolean) =>
+    request<PuzzleAttemptResult>("/puzzles/attempt", {
+      method: "POST",
+      body: JSON.stringify({ puzzle_id, solved }),
+    }),
+
+  puzzleStats: () => request<PuzzleStats>("/puzzles/stats"),
 
   // ---- connected accounts (auto-import) ----
 

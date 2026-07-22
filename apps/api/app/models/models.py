@@ -27,6 +27,7 @@ class User(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    puzzle_rating: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
 
     games: Mapped[list["Game"]] = relationship(back_populates="owner")
 
@@ -211,6 +212,34 @@ class Repertoire(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(Text, nullable=False)
     color: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Puzzle(Base):
+    __tablename__ = "puzzles"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    lichess_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    fen: Mapped[str] = mapped_column(Text, nullable=False)
+    moves: Mapped[str] = mapped_column(Text, nullable=False)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    rating_dev: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    popularity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nb_plays: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    themes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    game_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    opening_tags: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PuzzleAttempt(Base):
+    __tablename__ = "puzzle_attempts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    puzzle_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("puzzles.id", ondelete="CASCADE"))
+    solved: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    rating_before: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rating_after: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

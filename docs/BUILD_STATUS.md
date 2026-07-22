@@ -292,6 +292,36 @@ host exists — the engine service can select an engine per job when added.
 
 ---
 
+### Tactics puzzle trainer (COMPLETE ✅)
+**Date:** July 22, 2026
+**What shipped:**
+
+1. **Real Lichess puzzles** (CC0). `pipeline/load_puzzles.py` streams
+   `lichess_db_puzzle.csv.zst`, decompressing on the fly and stopping once
+   enough pass the rating/popularity filters - no full ~250MB download.
+   Loaded 20,000 puzzles (rating 600-2400).
+2. **Schema** (migration 007): `puzzles`, `puzzle_attempts`, and
+   `users.puzzle_rating` (default 1200).
+3. **Backend** (`/puzzles` router):
+   - `GET /puzzles/next` - a puzzle near the player's rating they haven't
+     seen (falls back to any unseen, then any); optional `?theme=`.
+   - `POST /puzzles/attempt` - records solve/fail, updates puzzle_rating
+     Elo-style (K=32), returns the delta.
+   - `GET /puzzles/stats` - rating, solved/attempted, current streak.
+4. **Frontend** `/train/puzzles`: board plays the setup move automatically,
+   validates the solution line move-by-move (alternate mate accepted),
+   reveals rating + themes + Lichess game link after each attempt, shows
+   the player's tactics rating and streak. **Visible "🧩 Puzzles" nav
+   entry** added to the app header and the trainer page.
+5. **Verified**: solve/fail/rating/stats end-to-end via the API (solving a
+   925 puzzle at rating 1200 gave +5; failing a 1480 gave -5; streak reset).
+   Note: the in-app browser pane's renderer was degraded during this session
+   (react-chessboard rendered empty on every page, including the known-good
+   /app board), so board-pixel interaction wasn't scriptable here; the page
+   loads, picks the solver's side, and reaches the solving state correctly.
+
+---
+
 ## WHAT WE HAVEN'T DONE (The Roadmap Ahead)
 
 ### Sprint 2 remainder

@@ -83,6 +83,7 @@ export default function TrainPage() {
     <div className="min-h-screen p-4 max-w-5xl mx-auto">
       <header className="flex items-center gap-4 mb-4">
         <Link href="/app" className="btn">← Board</Link>
+        <Link href="/train/puzzles" className="btn">🧩 Puzzles</Link>
         <h1 className="text-xl font-bold">Repertoire Trainer</h1>
         <span className="ml-auto text-sm text-muted">
           Session: <span className="text-accent">{session.right} ✓</span>{" "}
