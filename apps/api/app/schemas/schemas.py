@@ -143,7 +143,7 @@ class AnalysisJobOut(BaseModel):
 class ExplorerRequest(BaseModel):
     fen: str = Field(max_length=200)
     min_elo: int | None = Field(default=None, ge=0, le=3500)
-    scope: str = Field(default="reference", pattern="^(reference|mine)$")
+    scope: str = Field(default="reference", pattern="^(reference|mine|lichess_live)$")
 
 
 class ExplorerMove(BaseModel):

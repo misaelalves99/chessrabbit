@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEngine, formatEval } from "@/hooks/useEngine";
-import { Annotation, api, ExplorerMove, ReviewSummary } from "@/lib/api";
+import { Annotation, api, ExplorerMove, ExplorerScope, ReviewSummary } from "@/lib/api";
 import ReviewPanel, { CLASS_META } from "@/components/ReviewPanel";
 
 interface Props {
@@ -27,7 +27,8 @@ export default function AnalysisBoard({
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [explorer, setExplorer] = useState<ExplorerMove[]>([]);
   const [explorerTotal, setExplorerTotal] = useState(0);
-  const [explorerScope, setExplorerScope] = useState<"reference" | "mine">("reference");
+  const [explorerScope, setExplorerScope] = useState<ExplorerScope>("reference");
+  const [explorerError, setExplorerError] = useState(false);
   const [autoAnalyse, setAutoAnalyse] = useState(true);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
@@ -165,13 +166,15 @@ export default function AnalysisBoard({
       .then((res) => {
         setExplorer(res.moves);
         setExplorerTotal(res.total_games);
+        setExplorerError(false);
       })
       .catch(() => {
         setExplorer([]);
         setExplorerTotal(0);
+        setExplorerError(true);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fen, engine.connected, autoAnalyse]);
+  }, [fen, engine.connected, autoAnalyse, explorerScope]);
 
   // Playing a move from the current cursor truncates any future moves
   const onDrop = useCallback(
@@ -405,14 +408,22 @@ export default function AnalysisBoard({
         {/* Opening explorer */}
         <section className="bg-panelAlt rounded p-3">
           <h3 className="font-semibold text-sm mb-2">
-            <span className="mr-2">
+            <span className="mr-2 flex flex-wrap gap-x-1.5 items-baseline">
               <button
                 onClick={() => setExplorerScope("reference")}
                 className={explorerScope === "reference" ? "text-accent" : "text-muted hover:text-ink"}
               >
                 Masters
               </button>
-              {" · "}
+              <span className="text-muted">·</span>
+              <button
+                onClick={() => setExplorerScope("lichess_live")}
+                className={explorerScope === "lichess_live" ? "text-accent" : "text-muted hover:text-ink"}
+                title="Live from Lichess's Opening Explorer API"
+              >
+                Masters (live)
+              </button>
+              <span className="text-muted">·</span>
               <button
                 onClick={() => setExplorerScope("mine")}
                 className={explorerScope === "mine" ? "text-accent" : "text-muted hover:text-ink"}
@@ -422,12 +433,22 @@ export default function AnalysisBoard({
             </span>{" "}
             <span className="text-muted font-normal text-xs">
               {explorerTotal.toLocaleString()} games
+              {explorerScope === "lichess_live" && (
+                <span className="ml-1 text-accent" title="Fetched live from Lichess">
+                  ● live
+                </span>
+              )}
             </span>
           </h3>
           {explorer.length === 0 ? (
             <p className="text-xs text-muted">
-              No reference games for this position. Load the Lichess database
-              (see pipeline/README.md) to populate the explorer.
+              {explorerError && explorerScope === "lichess_live"
+                ? "Live Lichess explorer is unavailable right now — try again shortly."
+                : explorerScope === "mine"
+                  ? "None of your games reached this position yet."
+                  : explorerScope === "lichess_live"
+                    ? "No master games have reached this position on Lichess."
+                    : "No reference games for this position. Load games via pipeline/load_lichess_api.py to populate the explorer."}
             </p>
           ) : (
             <table className="w-full text-xs">

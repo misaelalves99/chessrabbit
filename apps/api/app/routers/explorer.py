@@ -12,8 +12,40 @@ from app.core.db import get_db
 from app.core.deps import get_optional_user
 from app.models import User
 from app.schemas import ExplorerMove, ExplorerOut, ExplorerRequest, GameOut
+from app.services.lichess_explorer import ExplorerUnavailable, masters_moves
 
 router = APIRouter(tags=["explorer"])
+
+
+async def _lichess_live(fen: str) -> ExplorerOut:
+    """Map Lichess's live masters response to our ExplorerOut shape."""
+    try:
+        data = await masters_moves(fen)
+    except ExplorerUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "explorer_unavailable", "message": str(exc)},
+        )
+
+    moves: list[ExplorerMove] = []
+    for m in data.get("moves", []):
+        w, d, b = m.get("white", 0), m.get("draws", 0), m.get("black", 0)
+        n = max(1, w + d + b)
+        moves.append(
+            ExplorerMove(
+                uci=m.get("uci", ""),
+                san=m.get("san", m.get("uci", "")),
+                games=w + d + b,
+                white_wins=w, draws=d, black_wins=b,
+                avg_elo=m.get("averageRating"),
+                white_pct=round(100 * w / n, 1),
+                draw_pct=round(100 * d / n, 1),
+                black_pct=round(100 * b / n, 1),
+            )
+        )
+
+    total = data.get("white", 0) + data.get("draws", 0) + data.get("black", 0)
+    return ExplorerOut(fen=fen, total_games=total, moves=moves)
 
 
 @router.post("/explorer", response_model=ExplorerOut)
@@ -30,6 +62,8 @@ async def explorer(
     the Personal Opening Tree. Requires auth; user collections are small
     enough (free tier caps at 50 games) that an indexed GROUP BY at query
     time beats maintaining a second tree.
+    scope="lichess_live": queried on demand from Lichess's Opening Explorer
+    API, so the masters statistics are always current (not our snapshot).
     """
     try:
         board = validate_fen(payload.fen)
@@ -38,6 +72,9 @@ async def explorer(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "invalid_fen", "message": str(exc)},
         )
+
+    if payload.scope == "lichess_live":
+        return await _lichess_live(payload.fen)
 
     zob = zobrist_of(payload.fen)
 

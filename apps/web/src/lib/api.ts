@@ -77,6 +77,8 @@ export interface EvalLine {
   pv: string[];
 }
 
+export type ExplorerScope = "reference" | "mine" | "lichess_live";
+
 export interface ExplorerMove {
   uci: string;
   san: string;
@@ -276,10 +278,10 @@ export const api = {
       `/analysis/jobs/${jobId}`
     ),
 
-  explorer: (fen: string, scope: "reference" | "mine" = "reference") =>
+  explorer: (fen: string, scope: ExplorerScope = "reference") =>
     request<{ fen: string; total_games: number; moves: ExplorerMove[] }>(
       "/explorer",
-      { method: "POST", body: JSON.stringify({ fen }) }
+      { method: "POST", body: JSON.stringify({ fen, scope }) }
     ),
 
   searchPosition: (fen: string) =>
