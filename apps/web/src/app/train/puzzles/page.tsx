@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { useClickToMove } from "@/hooks/useClickToMove";
 import {
   api, Puzzle, PuzzleAttemptResult, PuzzleStats, PuzzleTheme,
 } from "@/lib/api";
@@ -192,6 +193,10 @@ export default function PuzzlesPage() {
     [status, puzzle, solIdx, finish]
   );
 
+  const { onSquareClick, squareStyles } = useClickToMove(
+    fen, onDrop, status === "solving"
+  );
+
   function switchMode(m: Mode) {
     modeRef.current = m;
     setMode(m);
@@ -335,11 +340,13 @@ export default function PuzzlesPage() {
             <Chessboard
               position={fen}
               onPieceDrop={onDrop}
+              onSquareClick={onSquareClick}
               boardOrientation={orientation}
               arePiecesDraggable={status === "solving"}
               customBoardStyle={{ borderRadius: "4px" }}
               customDarkSquareStyle={{ backgroundColor: "#739552" }}
               customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+              customSquareStyles={squareStyles}
             />
           </div>
         )}

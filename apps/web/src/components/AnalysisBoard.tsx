@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEngine, formatEval } from "@/hooks/useEngine";
+import { useClickToMove } from "@/hooks/useClickToMove";
 import { Annotation, api, ExplorerMove, ExplorerScope, ReviewSummary } from "@/lib/api";
 import ReviewPanel, { CLASS_META } from "@/components/ReviewPanel";
 
@@ -196,6 +197,8 @@ export default function AnalysisBoard({
     [cursor, history, positionAt]
   );
 
+  const { onSquareClick, squareStyles } = useClickToMove(fen, onDrop);
+
   // Keyboard navigation, like every serious chess GUI
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -237,11 +240,12 @@ export default function AnalysisBoard({
             <Chessboard
               position={fen}
               onPieceDrop={onDrop}
+              onSquareClick={onSquareClick}
               boardOrientation={orientation}
               customBoardStyle={{ borderRadius: "4px" }}
               customDarkSquareStyle={{ backgroundColor: "#739552" }}
               customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
-              customSquareStyles={highlightStyles}
+              customSquareStyles={{ ...highlightStyles, ...squareStyles }}
             />
             {/* Classification badge on the destination square (chess.com-style) */}
             {reviewedMove && reviewedClass && (

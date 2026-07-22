@@ -4,9 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
+import { useClickToMove } from "@/hooks/useClickToMove";
 import {
   api, ApiError, Repertoire, TrainingCard, TrainingResult,
 } from "@/lib/api";
+
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 type Feedback = (TrainingResult & { answered: string }) | null;
 
@@ -58,6 +61,10 @@ export default function TrainPage() {
     [card, feedback]
   );
 
+  const { onSquareClick, squareStyles } = useClickToMove(
+    card?.fen ?? START_FEN, onDrop, !!card && !feedback
+  );
+
   function next() {
     const rest = queue.slice(1);
     setQueue(rest);
@@ -106,14 +113,16 @@ export default function TrainPage() {
                 <span className="text-ink">{card.repertoire_name}</span> · playing{" "}
                 {card.color} · card seen {card.reps}×
               </p>
-              <div className="max-w-[440px]">
+              <div className="w-[min(92vw,440px)]">
                 <Chessboard
                   position={card.fen}
                   onPieceDrop={onDrop}
+                  onSquareClick={onSquareClick}
                   boardOrientation={card.color}
                   arePiecesDraggable={!feedback}
                   customDarkSquareStyle={{ backgroundColor: "#739552" }}
                   customLightSquareStyle={{ backgroundColor: "#EBECD0" }}
+                  customSquareStyles={squareStyles}
                 />
               </div>
 
