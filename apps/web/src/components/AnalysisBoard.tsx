@@ -281,25 +281,34 @@ export default function AnalysisBoard({
             )}
           </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-2 mt-3">
-            <button onClick={() => setCursor(0)} className="btn">⏮</button>
-            <button onClick={() => setCursor((c) => Math.max(0, c - 1))} className="btn">◀</button>
-            <button
-              onClick={() => setCursor((c) => Math.min(history.length, c + 1))}
-              className="btn"
-            >
-              ▶
-            </button>
-            <button onClick={() => setCursor(history.length)} className="btn">⏭</button>
+          {/* Controls: one segmented cluster, centred under the board */}
+          <div className="relative flex items-center justify-center gap-2 mt-3">
+            <div className="inline-flex rounded-lg overflow-hidden border border-white/10 bg-white/5 divide-x divide-white/10">
+              {[
+                { glyph: "«", title: "Start (↑)", go: () => setCursor(0) },
+                { glyph: "‹", title: "Back (←)", go: () => setCursor((c) => Math.max(0, c - 1)) },
+                { glyph: "›", title: "Forward (→)", go: () => setCursor((c) => Math.min(history.length, c + 1)) },
+                { glyph: "»", title: "End (↓)", go: () => setCursor(history.length) },
+              ].map((b) => (
+                <button
+                  key={b.glyph}
+                  onClick={b.go}
+                  title={b.title}
+                  className="px-4 py-1.5 text-lg leading-none text-muted hover:text-ink hover:bg-white/10 transition-colors"
+                >
+                  {b.glyph}
+                </button>
+              ))}
+            </div>
             <button
               onClick={() => setOrientation((o) => (o === "white" ? "black" : "white"))}
-              className="btn"
+              title="Flip board (f)"
+              className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-lg leading-none text-muted hover:text-ink hover:bg-white/10 transition-colors"
             >
-              ⟳ Flip
+              ⟳
             </button>
-            <span className="ml-auto text-xs text-muted">
-              ply {cursor}/{history.length}
+            <span className="absolute right-0 text-xs text-muted font-mono">
+              {cursor}/{history.length}
             </span>
           </div>
         </div>

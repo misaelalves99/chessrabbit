@@ -27,6 +27,7 @@ export default function AppPage() {
   const [pgnText, setPgnText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [accounts, setAccounts] = useState<ExternalAccount[]>([]);
   const [connectPlatform, setConnectPlatform] = useState<"lichess" | "chesscom">("lichess");
@@ -181,39 +182,119 @@ export default function AppPage() {
             Rabbit
           </span>
         </span>
-        <span className="text-xs text-muted">
-          {me.display_name} ·{" "}
-          <span className={me.plan === "pro" ? "text-accent" : ""}>
+        {/* Primary nav: one segmented pill group, no icon soup */}
+        <nav className="hidden md:flex items-center gap-0.5 ml-3 bg-white/5 border border-white/5 rounded-full p-1 text-sm">
+          {[
+            { href: "/app", label: "Analyse", active: true },
+            { href: "/train", label: "Train" },
+            { href: "/train/puzzles", label: "Puzzles" },
+            { href: "/play", label: "Play" },
+            { href: "/prep", label: "Prep" },
+          ].map((n) => (
+            <Link
+              key={n.href}
+              href={n.href}
+              className={`px-3 py-1 rounded-full transition-colors ${
+                n.active
+                  ? "bg-accent/20 text-accent font-medium"
+                  : "text-muted hover:text-ink hover:bg-white/5"
+              }`}
+            >
+              {n.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Everything else lives behind the avatar */}
+        <div className="ml-auto flex items-center gap-3">
+          <span
+            className={`text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 ${
+              me.plan === "master"
+                ? "bg-gold/15 text-gold"
+                : me.plan === "pro"
+                  ? "bg-accent/20 text-accent"
+                  : "bg-white/10 text-muted"
+            }`}
+          >
             {me.plan}
           </span>
-          {me.daily_limit !== null &&
-            ` · ${me.analyses_today}/${me.daily_limit} analyses today`}
-        </span>
-        <div className="ml-auto flex gap-2">
-          <button className="btn" onClick={billingAction}>
-            {me.plan === "free" ? "★ Upgrade" : "Manage billing"}
-          </button>
-          <Link href="/train" className="btn">
-            ♞ Train
-          </Link>
-          <Link href="/train/puzzles" className="btn">
-            🧩 Puzzles
-          </Link>
-          <Link href="/play" className="btn">
-            ♟ Play
-          </Link>
-          <Link href="/prep" className="btn">
-            🎯 Prep
-          </Link>
-          <button className="btn" onClick={openAccounts}>
-            ⇄ Accounts
-          </button>
-          <button className="btn" onClick={() => setImportOpen(true)}>
-            + Import PGN
-          </button>
-          <button className="btn" onClick={signOut}>
-            Sign out
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              className="w-8 h-8 rounded-full bg-gradient-to-br from-accent to-accent2
+                         text-panel font-bold text-sm flex items-center justify-center
+                         hover:shadow-glow transition-shadow"
+              title={me.display_name || me.email}
+            >
+              {(me.display_name || me.email)[0].toUpperCase()}
+            </button>
+            {menuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div className="absolute right-0 top-full mt-2 w-60 bg-panelAlt border border-white/10 rounded-xl shadow-card p-1.5 z-50">
+                  <div className="px-3 py-2 border-b border-white/5 mb-1">
+                    <p className="text-sm font-medium truncate">
+                      {me.display_name || me.email}
+                    </p>
+                    {me.daily_limit !== null && (
+                      <p className="text-xs text-muted">
+                        {me.analyses_today}/{me.daily_limit} analyses today
+                      </p>
+                    )}
+                  </div>
+                  <div className="md:hidden border-b border-white/5 mb-1 pb-1">
+                    {[
+                      { href: "/train", label: "Train" },
+                      { href: "/train/puzzles", label: "Puzzles" },
+                      { href: "/play", label: "Play" },
+                      { href: "/prep", label: "Prep" },
+                    ].map((n) => (
+                      <Link
+                        key={n.href}
+                        href={n.href}
+                        className="block px-3 py-1.5 rounded-lg text-sm text-ink/90 hover:bg-white/5"
+                      >
+                        {n.label}
+                      </Link>
+                    ))}
+                  </div>
+                  <button
+                    className="w-full text-left px-3 py-1.5 rounded-lg text-sm text-ink/90 hover:bg-white/5"
+                    onClick={() => { setMenuOpen(false); setImportOpen(true); }}
+                  >
+                    Import PGN
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-1.5 rounded-lg text-sm text-ink/90 hover:bg-white/5"
+                    onClick={() => { setMenuOpen(false); openAccounts(); }}
+                  >
+                    Connected accounts
+                  </button>
+                  <button
+                    className="w-full text-left px-3 py-1.5 rounded-lg text-sm text-ink/90 hover:bg-white/5"
+                    onClick={() => { setMenuOpen(false); billingAction(); }}
+                  >
+                    {me.plan === "free" ? "★ Upgrade plan" : "Manage billing"}
+                  </button>
+                  <Link
+                    href="/pricing"
+                    className="block px-3 py-1.5 rounded-lg text-sm text-ink/90 hover:bg-white/5"
+                  >
+                    Plans and pricing
+                  </Link>
+                  <button
+                    className="w-full text-left px-3 py-1.5 rounded-lg text-sm text-red-300 hover:bg-red-500/10 border-t border-white/5 mt-1 pt-2"
+                    onClick={signOut}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 

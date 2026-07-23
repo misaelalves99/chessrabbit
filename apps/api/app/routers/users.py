@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user, usage_today
+from app.core.tiers import is_paid
 from app.models import Game, User
 from app.schemas import MeOut
 
@@ -26,7 +27,7 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         email_verified=user.email_verified,
         created_at=user.created_at,
         analyses_today=used,
-        daily_limit=None if user.plan == "pro" else settings.FREE_DAILY_ANALYSES,
+        daily_limit=None if is_paid(user.plan) else settings.FREE_DAILY_ANALYSES,
         max_depth=settings.max_depth_for(user.plan),
         max_multipv=settings.max_multipv_for(user.plan),
     )
