@@ -602,7 +602,7 @@ Free user hits a cap → inline upgrade prompt exactly where the value was denie
 ---
 
 ## 14. Infrastructure & deployment
-- **Launch box**: Hetzner CCX23 (8 dedicated vCPU / 32 GB, ~€50/mo): runs everything. Engine workers pinned to 4–6 cores (each job: Threads=2, Hash=256 MB ⇒ 2–3 concurrent deep analyses; queue absorbs bursts).
+- **Launch box**: Hetzner CCX33 (8 dedicated vCPU / 32 GB, ~€50/mo): runs everything. Engine workers pinned to 4–6 cores (each job: Threads=2, Hash=256 MB ⇒ 2–3 concurrent deep analyses; queue absorbs bursts).
 - **Scale path** (no code changes): move Postgres to its own node or managed; add engine-only worker nodes pointing at the same Redis (`docker compose --profile worker up` on each). 10 engine nodes ≈ €400/mo serves thousands of subscribers.
 - Deploy: GitHub Actions builds images → `docker compose pull && up -d` over SSH; migrations via Alembic on release; blue-green not needed at this scale — 10 s of downtime at 4 a.m. is fine.
 - Runbook `infra/deploy.md` documents: deploy, rollback (previous image tag), restore-from-backup, rotate secrets.

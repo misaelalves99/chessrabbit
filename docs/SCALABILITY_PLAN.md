@@ -71,7 +71,7 @@ Set `pool_size=5, max_overflow=5` per worker now; adopt pgbouncer in Phase 2.
 ## Phase 1 — One good VPS (launch → ~500 active users)
 
 **Trigger:** launching.
-**Hardware:** Hetzner CCX23 (8 dedicated vCPU / 32 GB) per BLUEPRINT §14. ~€50/mo.
+**Hardware:** Hetzner CCX33 (8 dedicated vCPU / 32 GB) per BLUEPRINT §14. ~€50/mo.
 
 - Everything on one box via compose: Caddy (HTTPS) → web + api; postgres; redis; 1 engine
   container with `ENGINE_WORKERS=3`, `Threads=2` → ~3 concurrent deep analyses after 0.1.
