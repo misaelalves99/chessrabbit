@@ -53,6 +53,9 @@ export default function AppPage() {
   const [activeLabel, setActiveLabel] = useState<string | undefined>();
   const [activeId, setActiveId] = useState<number | undefined>();
   const [activeAnnotations, setActiveAnnotations] = useState<Annotation[]>([]);
+  // The server's own ply count, so the board can tell when its parse of the
+  // PGN disagrees with the one the review was built from.
+  const [activePlies, setActivePlies] = useState<number | undefined>();
   const [importOpen, setImportOpen] = useState(false);
   const [pgnText, setPgnText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -124,6 +127,7 @@ export default function AppPage() {
       setActivePgn(detail.movetext);
       setActiveId(g.id);
       setActiveAnnotations(detail.annotations);
+      setActivePlies(detail.ply_count);
       setActiveLabel(
         `${g.white} vs ${g.black} · ${g.result}${g.event ? ` · ${g.event}` : ""}`
       );
@@ -463,6 +467,7 @@ export default function AppPage() {
             gameLabel={activeLabel}
             gameId={activeId}
             initialAnnotations={activeAnnotations}
+            expectedPlies={activePlies}
           />
         </main>
       </div>

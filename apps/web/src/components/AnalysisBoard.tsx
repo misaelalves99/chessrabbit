@@ -45,6 +45,8 @@ interface Props {
   gameLabel?: string;
   gameId?: number;
   initialAnnotations?: Annotation[];
+  /** Ply count the server recorded for this game — see `aligned` below. */
+  expectedPlies?: number;
 }
 
 export default function AnalysisBoard({
@@ -52,6 +54,7 @@ export default function AnalysisBoard({
   gameLabel,
   gameId,
   initialAnnotations,
+  expectedPlies,
 }: Props) {
   // `game` is the authoritative position; history drives the move list.
   const [history, setHistory] = useState<string[]>([]);
@@ -121,11 +124,27 @@ export default function AnalysisBoard({
     }
   }, [gameId, reviewing]);
 
+  /**
+   * Do the server's annotations describe the move list we actually have?
+   *
+   * Annotations are keyed by ply index against a move list the browser
+   * re-derives by parsing the PGN, while the server keyed them against its own
+   * parse. If the two disagree by even one move, every badge, headline and
+   * arrow after that point silently describes a different move — which is how
+   * a review once announced "d4 is a blunder" directly above "Best was d4".
+   *
+   * ply_count comes from the server's parse, so comparing it to ours turns
+   * that silent corruption into a visible, honest refusal.
+   */
+  const aligned =
+    expectedPlies == null || history.length === 0 || history.length === expectedPlies;
+
   const annByPly = useMemo(() => {
     const m = new Map<number, Annotation>();
+    if (!aligned) return m;
     for (const a of annotations) if (a.classification) m.set(a.ply, a);
     return m;
-  }, [annotations]);
+  }, [annotations, aligned]);
 
   const hasReview = annByPly.size > 0;
 
@@ -425,6 +444,15 @@ export default function AnalysisBoard({
 
         {/* Scrolling body */}
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {!aligned && (
+            <div className="mb-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs leading-relaxed">
+              This game&apos;s review was built from {expectedPlies} moves but the
+              board reads {history.length}, so the two no longer line up. Hiding
+              it rather than labelling the wrong moves — re-run the review to
+              rebuild it.
+            </div>
+          )}
+
           {reviewNotice && (
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-xs">
               <span>⏳ {reviewNotice}</span>
@@ -437,7 +465,7 @@ export default function AnalysisBoard({
           {tab === "review" && (
             <ReviewPanel
               history={history}
-              annotations={annotations}
+              annotations={aligned ? annotations : []}
               summary={reviewSummary}
               cursor={cursor}
               onSeek={setCursor}
