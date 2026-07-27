@@ -534,11 +534,22 @@ def _build_reviews(
                 cls, move, board, after, fens, i, info, nxt, white_moved, best_san, line
             )
 
+        # Record which move this row is about, so a client can verify the
+        # annotation lines up with the move it holds at this ply instead of
+        # trusting the index. SAN comes from `board`, the position before the
+        # move, so it is the server's parse that gets displayed.
+        try:
+            move_san = board.san(move)
+        except Exception:
+            move_san = None
+
         out.append({
             "ply": i,
             "nag": NAG_BY_CLASS.get(cls),
             "eval_cp": int(max(-10000, min(10000, nxt["cp"]))),
             "best_uci": best_uci,
+            "move_uci": move.uci(),
+            "move_san": move_san,
             "classification": cls,
             "review": review,
         })
@@ -656,17 +667,21 @@ async def _store_annotations(
             await cur.execute(
                 """
                 INSERT INTO annotations
-                  (game_id, user_id, ply, nag, eval_cp, best_uci, classification, review)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                  (game_id, user_id, ply, nag, eval_cp, best_uci, move_uci,
+                   move_san, classification, review)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (game_id, user_id, ply) DO UPDATE
                   SET nag = EXCLUDED.nag, eval_cp = EXCLUDED.eval_cp,
                       best_uci = EXCLUDED.best_uci,
+                      move_uci = EXCLUDED.move_uci,
+                      move_san = EXCLUDED.move_san,
                       classification = EXCLUDED.classification,
                       review = EXCLUDED.review
                 """,
                 (
                     game_id, user_id, ann["ply"], ann["nag"], ann["eval_cp"],
-                    ann["best_uci"], ann["classification"], ann["review"],
+                    ann["best_uci"], ann["move_uci"], ann["move_san"],
+                    ann["classification"], ann["review"],
                 ),
             )
     await conn.commit()

@@ -79,6 +79,14 @@ export interface Annotation {
   comment: string | null;
   eval_cp: number | null;
   best_uci: string | null;
+  /**
+   * The move this annotation reviews, from the server's parse of the PGN.
+   * `move_uci` lets the board confirm the row belongs to the move it holds at
+   * this ply; `move_san` is displayed rather than re-derived. Null on rows
+   * written before migration 011.
+   */
+  move_uci?: string | null;
+  move_san?: string | null;
   classification: Classification | null;
   review: string | null;
 }

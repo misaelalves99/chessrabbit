@@ -161,7 +161,13 @@ export default function ReviewPanel({
                 {currentMeta.glyph}
               </span>
               <span className="text-sm font-semibold leading-tight">
-                {headline(history[cursor - 1] ?? "", current.classification!)}
+                {/* The server's SAN wins: it comes from the same parse the
+                    review was written against, so the headline can never
+                    disagree with the sentence underneath it. */}
+                {headline(
+                  current.move_san ?? history[cursor - 1] ?? "",
+                  current.classification!
+                )}
               </span>
               <span className="ml-auto shrink-0 rounded-md bg-black/30 px-1.5 py-0.5 font-mono text-xs">
                 {evalText(current.eval_cp)}

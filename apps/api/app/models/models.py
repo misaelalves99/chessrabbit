@@ -163,6 +163,10 @@ class Annotation(Base):
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     eval_cp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     best_uci: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The move this row reviews (migration 011). Nullable: rows written before
+    # it have none, and the client falls back to a coarser alignment check.
+    move_uci: Mapped[str | None] = mapped_column(Text, nullable=True)
+    move_san: Mapped[str | None] = mapped_column(Text, nullable=True)
     classification: Mapped[str | None] = mapped_column(Text, nullable=True)
     review: Mapped[str | None] = mapped_column(Text, nullable=True)
 

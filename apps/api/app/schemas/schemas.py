@@ -117,6 +117,10 @@ class AnnotationOut(BaseModel):
     comment: str | None
     eval_cp: int | None
     best_uci: str | None = None
+    # The move being reviewed. Lets a client confirm this row lines up with the
+    # move it holds at this ply, instead of trusting the index (migration 011).
+    move_uci: str | None = None
+    move_san: str | None = None
     classification: str | None = None
     review: str | None = None
 

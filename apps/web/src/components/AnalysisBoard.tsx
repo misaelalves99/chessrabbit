@@ -45,7 +45,7 @@ interface Props {
   gameLabel?: string;
   gameId?: number;
   initialAnnotations?: Annotation[];
-  /** Ply count the server recorded for this game — see `aligned` below. */
+  /** Ply count from the server's parse — the fallback alignment check. */
   expectedPlies?: number;
 }
 
@@ -124,29 +124,6 @@ export default function AnalysisBoard({
     }
   }, [gameId, reviewing]);
 
-  /**
-   * Do the server's annotations describe the move list we actually have?
-   *
-   * Annotations are keyed by ply index against a move list the browser
-   * re-derives by parsing the PGN, while the server keyed them against its own
-   * parse. If the two disagree by even one move, every badge, headline and
-   * arrow after that point silently describes a different move — which is how
-   * a review once announced "d4 is a blunder" directly above "Best was d4".
-   *
-   * ply_count comes from the server's parse, so comparing it to ours turns
-   * that silent corruption into a visible, honest refusal.
-   */
-  const aligned =
-    expectedPlies == null || history.length === 0 || history.length === expectedPlies;
-
-  const annByPly = useMemo(() => {
-    const m = new Map<number, Annotation>();
-    if (!aligned) return m;
-    for (const a of annotations) if (a.classification) m.set(a.ply, a);
-    return m;
-  }, [annotations, aligned]);
-
-  const hasReview = annByPly.size > 0;
 
   // One replay of the game per move list, not one per cursor step. It yields
   // both the from/to squares (board highlighting + badges) and the position
@@ -167,6 +144,50 @@ export default function AnalysisBoard({
     }
     return { moveSquares: squares, fens: positions };
   }, [history]);
+
+  /**
+   * Keep only the annotations that provably describe the move we hold.
+   *
+   * Annotations are keyed by ply index against a move list the browser
+   * re-derives by parsing the PGN, while the server keyed them against its own
+   * parse. If the two disagree by even one move, every badge, headline and
+   * arrow after that point silently describes a different move — which is how
+   * a review once announced "d4 is a blunder" directly above "Best was d4".
+   *
+   * Each row now carries the move it reviews, so alignment is checked per ply
+   * rather than assumed. Rows predating migration 011 have no move recorded;
+   * for those we fall back to comparing the whole-game ply count, which catches
+   * a diverged parse without being able to pinpoint it.
+   */
+  const { annByPly, mismatched } = useMemo(() => {
+    const m = new Map<number, Annotation>();
+    let bad = 0;
+
+    // Only meaningful once the PGN has been read into `history`.
+    const countAgrees =
+      expectedPlies == null || history.length === 0 || history.length === expectedPlies;
+
+    for (const a of annotations) {
+      if (!a.classification) continue;
+      const played = moveSquares[a.ply];
+
+      if (a.move_uci) {
+        // No move at this ply means the row describes a game we do not have.
+        // from+to is enough: a promotion suffix cannot change which move it is.
+        if (!played || a.move_uci.slice(0, 4) !== `${played.from}${played.to}`) {
+          bad++;
+          continue;
+        }
+      } else if (!countAgrees) {
+        bad++;
+        continue;
+      }
+      m.set(a.ply, a);
+    }
+    return { annByPly: m, mismatched: bad };
+  }, [annotations, moveSquares, expectedPlies, history.length]);
+
+  const hasReview = annByPly.size > 0;
 
   // The move the cursor just played (ply cursor-1) and its review verdict
   const reviewedMove = cursor > 0 ? moveSquares[cursor - 1] : undefined;
@@ -444,12 +465,12 @@ export default function AnalysisBoard({
 
         {/* Scrolling body */}
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-          {!aligned && (
+          {mismatched > 0 && (
             <div className="mb-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs leading-relaxed">
-              This game&apos;s review was built from {expectedPlies} moves but the
-              board reads {history.length}, so the two no longer line up. Hiding
-              it rather than labelling the wrong moves — re-run the review to
-              rebuild it.
+              {mismatched} reviewed move{mismatched === 1 ? "" : "s"} in this game
+              no longer match the board, so {mismatched === 1 ? "it is" : "they are"}{" "}
+              hidden rather than labelled against the wrong move. Re-run the
+              review to rebuild it.
             </div>
           )}
 
@@ -465,7 +486,7 @@ export default function AnalysisBoard({
           {tab === "review" && (
             <ReviewPanel
               history={history}
-              annotations={aligned ? annotations : []}
+              annotations={[...annByPly.values()]}
               summary={reviewSummary}
               cursor={cursor}
               onSeek={setCursor}
