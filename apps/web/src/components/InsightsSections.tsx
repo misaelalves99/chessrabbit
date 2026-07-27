@@ -23,8 +23,26 @@ import AreaChart from "@/components/charts/AreaChart";
 const num = (n: number) => n.toLocaleString();
 const acc = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(1));
 
-function NeedsReview({ reviewed }: { reviewed: number }) {
-  if (reviewed > 0) return null;
+// The page keeps its second-person voice when it is about you, and names the
+// player when it is not. `data.player` is set only for a looked-up player.
+const poss = (d: Insights) => (d.player ? `${d.player}'s` : "your");
+const subj = (d: Insights) => (d.player ? d.player : "you");
+
+function NeedsReview({ data }: { data: Insights }) {
+  // Another player's games are never engine-reviewed — reviewing a whole
+  // career per lookup would cost more than the rest of the product. Say that,
+  // rather than inviting someone to review games that are not theirs.
+  if (data.engine_metrics === false) {
+    return (
+      <p className="text-xs leading-relaxed text-muted">
+        This one is built from engine reviews, which we only run on your own
+        games — analysing {data.player ? `${data.player}'s` : "another player's"}{" "}
+        whole history would take hours of engine time. Everything on this page
+        that comes from the moves alone is filled in.
+      </p>
+    );
+  }
+  if (data.reviewed > 0) return null;
   return (
     <p className="text-xs leading-relaxed text-muted">
       This one is built from engine reviews, and none of your games have been
@@ -45,14 +63,14 @@ export function GamesSection({ data }: { data: Insights }) {
   const byMove = o.accuracy_by_move.map((m) => ({
     label: `Move ${m.move}`,
     value: m.accuracy ?? 0,
-    note: `${num(m.moves)} of your moves`,
+    note: `${num(m.moves)} of ${poss(data)} moves`,
   }));
 
   return (
     <div className="space-y-4">
       <ChartCard
         title="Games played"
-        hint="Every game we can attribute to you, and how they finished."
+        hint={`Every game we can attribute to ${subj(data)}, and how they finished.`}
       >
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <StatTile value={num(o.played)} label="Games" />
@@ -84,10 +102,10 @@ export function GamesSection({ data }: { data: Insights }) {
 
       <ChartCard
         title="Accuracy"
-        hint="How closely your moves track the engine's best — 100 is perfect play."
+        hint={`How closely ${poss(data)} moves track the engine’s best — 100 is perfect play.`}
       >
         {data.reviewed === 0 ? (
-          <NeedsReview reviewed={0} />
+          <NeedsReview data={data} />
         ) : (
           <>
             <Columns
@@ -156,9 +174,9 @@ function terminationSlices(rows: { reason: string; games: number }[], color: str
 
 export function ResultsSection({ data }: { data: Insights }) {
   const groups = [
-    { key: "won", title: "Games you won by…", rows: data.results.won_by, color: OUTCOME.win },
-    { key: "drew", title: "Games you drew by…", rows: data.results.drew_by, color: OUTCOME.draw },
-    { key: "lost", title: "Games you lost by…", rows: data.results.lost_by, color: OUTCOME.loss },
+    { key: "won", title: `Games ${subj(data)} won by…`, rows: data.results.won_by, color: OUTCOME.win },
+    { key: "drew", title: `Games ${subj(data)} drew by…`, rows: data.results.drew_by, color: OUTCOME.draw },
+    { key: "lost", title: `Games ${subj(data)} lost by…`, rows: data.results.lost_by, color: OUTCOME.loss },
   ];
   const anyReason = groups.some((g) =>
     g.rows.some((r) => r.reason !== "other")
@@ -167,9 +185,9 @@ export function ResultsSection({ data }: { data: Insights }) {
   return (
     <div className="space-y-4">
       {!anyReason && (
-        <ChartCard title="How your games ended" hint="Reason each game finished.">
+        <ChartCard title={`How ${poss(data)} games ended`} hint="Reason each game finished.">
           <p className="text-xs leading-relaxed text-muted">
-            None of your games record a termination reason yet. Games synced
+            No games record a termination reason yet. Games synced
             from Lichess or Chess.com from now on will carry it — re-sync a
             connected account, or import fresh PGNs, and this fills in.
           </p>
@@ -216,8 +234,8 @@ export function PhasesSection({ data }: { data: Insights }) {
 
   if (data.reviewed === 0) {
     return (
-      <ChartCard title="Game phases" hint="Where your games are won and lost.">
-        <NeedsReview reviewed={0} />
+      <ChartCard title="Game phases" hint={`Where ${poss(data)} games are won and lost.`}>
+        <NeedsReview data={data} />
       </ChartCard>
     );
   }
@@ -335,7 +353,7 @@ export function OpeningsSection({ data }: { data: Insights }) {
   return (
     <ChartCard
       title="Opening performance"
-      hint="Your most-played openings with each colour, by how they actually go."
+      hint={`${data.player ? data.player + "’s" : "Your"} most-played openings with each colour, by how they actually go.`}
       actions={
         <div className="seg">
           {(["white", "black"] as const).map((s) => (
@@ -366,7 +384,7 @@ export function MovesSection({ data }: { data: Insights }) {
   if (data.reviewed === 0) {
     return (
       <ChartCard title="Move quality" hint="Every move you played, graded.">
-        <NeedsReview reviewed={0} />
+        <NeedsReview data={data} />
       </ChartCard>
     );
   }
@@ -458,7 +476,7 @@ export function MovesSection({ data }: { data: Insights }) {
                 baselineLabel="your average accuracy"
               />
             ) : (
-              <NeedsReview reviewed={0} />
+              <NeedsReview data={data} />
             )}
           </ChartCard>
         </>

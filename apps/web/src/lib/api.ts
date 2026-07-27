@@ -153,7 +153,25 @@ export interface OpeningRow {
   losses: number;
 }
 
+/** Where a set of insights came from. Absent means the signed-in user. */
+export type InsightsSource = "lichess" | "chesscom" | "otb";
+
+export interface OtbPlayer {
+  name: string;
+  games: number;
+}
+
 export interface Insights {
+  /** Set only when looking at somebody else. */
+  player?: string;
+  source?: InsightsSource;
+  /**
+   * False for another player: their games carry no engine annotations, so
+   * accuracy, move quality and game shape are absent rather than zero.
+   */
+  engine_metrics?: boolean;
+  /** Games actually replayed for the board-derived charts. */
+  replayed?: number;
   filters: {
     time_class: string | null;
     color: string | null;
@@ -605,6 +623,24 @@ export const api = {
     q.set("tz_offset", String(-new Date().getTimezoneOffset()));
     return request<Insights>(`/insights?${q.toString()}`);
   },
+
+  /** Insights for somebody else — Master plan only. */
+  playerInsights: (
+    source: InsightsSource,
+    username: string,
+    opts: InsightsQuery = {},
+  ) => {
+    const q = new URLSearchParams({ source, username });
+    if (opts.timeClass) q.set("time_class", opts.timeClass);
+    if (opts.color) q.set("color", opts.color);
+    if (opts.range && opts.range !== "all") q.set("range", opts.range);
+    q.set("tz_offset", String(-new Date().getTimezoneOffset()));
+    return request<Insights>(`/insights/player?${q.toString()}`);
+  },
+
+  /** Name-complete against the over-the-board reference database. */
+  searchOtbPlayers: (q: string) =>
+    request<OtbPlayer[]>(`/insights/players?q=${encodeURIComponent(q)}`),
 };
 
 export { ApiError, API_URL };

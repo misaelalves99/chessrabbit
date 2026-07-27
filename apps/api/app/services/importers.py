@@ -85,6 +85,10 @@ async def _fetch_lichess(
         "max": max_games,
         "moves": "true",
         "tags": "true",
+        # Without this Lichess omits the Opening header, so every imported game
+        # lands in Insights as "Unknown opening" - the openings charts were
+        # collapsing a whole account into one row.
+        "opening": "true",
         "perfType": _LICHESS_PERFS,
     }
     if since is not None:
