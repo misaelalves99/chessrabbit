@@ -14,10 +14,19 @@ services:
   engine:
     restart: unless-stopped
 
+  # `next start` is gone: next.config.js sets output:"export", so the build
+  # emits a static bundle into ./out and there is no Node server to run.
+  # This serves it locally; in production a CDN serves ./out and this whole
+  # service can be dropped (docs/DEPLOYMENT.md).
+  #
+  # NEXT_PUBLIC_* are inlined at build time, so they belong on the build, not
+  # on the running container. Override them for a real deployment.
   web:
-    command: sh -c "npm run build && npm run start"
+    command: sh -c "npm run build && node serve-static.mjs"
     environment:
       NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${APP_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_WS_URL: ${APP_WS_URL:-ws://localhost:8000}
     restart: unless-stopped
 
   postgres:
