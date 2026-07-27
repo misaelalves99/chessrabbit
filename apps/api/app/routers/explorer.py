@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 import chess
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
@@ -10,11 +13,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.chess_utils import validate_fen, zobrist_of
 from app.core.db import get_db
 from app.core.deps import get_optional_user
+from app.core.redis_client import get_redis
 from app.models import User
 from app.schemas import ExplorerMove, ExplorerOut, ExplorerRequest, GameOut
 from app.services.lichess_explorer import ExplorerUnavailable, masters_moves
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["explorer"])
+
+# The reference tree only changes when we reload a dump, so this can be long.
+EXPLORER_TTL = 86400
 
 
 async def _lichess_live(fen: str) -> ExplorerOut:
@@ -78,6 +86,20 @@ async def explorer(
 
     zob = zobrist_of(payload.fen)
 
+    # The reference tree is a static snapshot and openings are power-law
+    # distributed, so a small cache absorbs most of the traffic the analysis
+    # board generates. Keyed on the position, not the FEN string, so
+    # transpositions share an entry. "mine" is per-user and changes on import,
+    # so it is deliberately not cached here.
+    cache_key = f"exp:ref:{zob}" if payload.scope == "reference" else None
+    if cache_key:
+        try:
+            hit = await get_redis().get(cache_key)
+            if hit:
+                return ExplorerOut(**json.loads(hit))
+        except Exception:
+            log.warning("explorer cache read failed", exc_info=True)
+
     if payload.scope == "mine":
         if user is None:
             raise HTTPException(
@@ -138,7 +160,15 @@ async def explorer(
             )
         )
 
-    return ExplorerOut(fen=payload.fen, total_games=total, moves=moves)
+    out = ExplorerOut(fen=payload.fen, total_games=total, moves=moves)
+
+    if cache_key:
+        try:
+            await get_redis().setex(cache_key, EXPLORER_TTL, out.model_dump_json())
+        except Exception:
+            log.warning("explorer cache write failed", exc_info=True)
+
+    return out
 
 
 @router.post("/search/position", response_model=list[GameOut])

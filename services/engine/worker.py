@@ -130,12 +130,58 @@ async def set_job_status(conn, job_id: int, status: str, result: dict | None = N
 # Job handlers
 # ---------------------------------------------------------------
 
+CANCEL_PREFIX = "cancel:"
+
+
+async def is_abandoned(redis, job_id: int) -> bool:
+    """
+    True when the API has already given up on this job.
+
+    Live analysis is re-requested on every board navigation, so by the time a
+    consumer reaches a queued job the user has often moved on twice. Running it
+    anyway costs a full search and publishes to a channel nobody is listening
+    on - the single largest source of wasted engine CPU.
+    """
+    try:
+        return await redis.get(f"{CANCEL_PREFIX}{job_id}") is not None
+    except Exception:  # a cache blip must never stall the queue
+        return False
+
+
+async def watch_cancel(redis, job_id: int, stop_event: asyncio.Event) -> None:
+    """Trip `stop_event` the moment the API abandons an in-flight job."""
+    pubsub = redis.pubsub()
+    channel = f"{CANCEL_PREFIX}{job_id}"
+    await pubsub.subscribe(channel)
+    try:
+        async for message in pubsub.listen():
+            if message.get("type") == "message":
+                stop_event.set()
+                return
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        pass
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+        except Exception:
+            pass
+
+
 async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
     job_id = job["job_id"]
     fen = job["fen"]
     depth = min(int(job.get("depth", 20)), 40)
     multipv = max(1, min(int(job.get("multipv", 1)), 5))
     channel = f"eval:{job_id}"
+
+    # Cheapest possible check, before the engine or the database is touched.
+    if await is_abandoned(redis, job_id):
+        await set_job_status(conn, job_id, "canceled")
+        log.info("job %s: abandoned before start, skipped", job_id)
+        return
 
     try:
         chess.Board(fen)  # validate before handing anything to the engine
@@ -159,40 +205,64 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
     best_by_pv: dict[int, EvalLine] = {}
     reached_depth = 0
 
-    async with pool.acquire() as engine:
-        async for item in engine.analyse(fen, depth=depth, multipv=multipv, movetime_ms=None):
-            if isinstance(item, dict) and item.get("type") == "bestmove":
-                lines = [
-                    best_by_pv[k].to_white_perspective(wtm).as_dict()
-                    for k in sorted(best_by_pv)
-                ]
-                await cache_store(conn, zob, fen, pool.version, reached_depth, lines)
-                payload = {
-                    "type": "done",
-                    "cached": False,
-                    "depth": reached_depth,
-                    "best": item.get("move"),
-                    "lines": lines,
-                }
-                await redis.publish(channel, json.dumps(payload))
-                await set_job_status(conn, job_id, "done", result=payload)
-                log.info("job %s: computed to depth %s", job_id, reached_depth)
-                return
+    # Navigating away mid-search tells the engine to stop where it is. Whatever
+    # depth it reached is still cached below, so the work is banked rather than
+    # thrown away - the next visitor to this position starts from it.
+    stop_event = asyncio.Event()
+    watcher = asyncio.create_task(watch_cancel(redis, job_id, stop_event))
 
-            ev: EvalLine = item
-            best_by_pv[ev.multipv] = ev
-            reached_depth = max(reached_depth, ev.depth)
+    try:
+        async with pool.acquire() as engine:
+            async for item in engine.analyse(
+                fen, depth=depth, multipv=multipv, movetime_ms=None,
+                stop_event=stop_event,
+            ):
+                if isinstance(item, dict) and item.get("type") == "bestmove":
+                    lines = [
+                        best_by_pv[k].to_white_perspective(wtm).as_dict()
+                        for k in sorted(best_by_pv)
+                    ]
+                    if reached_depth:
+                        await cache_store(conn, zob, fen, pool.version, reached_depth, lines)
 
-            norm = ev.to_white_perspective(wtm)
-            await redis.publish(channel, json.dumps({"type": "info", **norm.as_dict()}))
+                    # A stopped search still reached a real depth; bank it, but
+                    # report it as canceled rather than a completed analysis.
+                    if stop_event.is_set():
+                        await set_job_status(conn, job_id, "canceled")
+                        log.info(
+                            "job %s: abandoned mid-search, stopped at depth %s",
+                            job_id, reached_depth,
+                        )
+                        return
 
-            # Persist at checkpoint depths so partial work survives a crash
-            if ev.depth in CHECKPOINT_DEPTHS and ev.multipv == multipv:
-                snapshot = [
-                    best_by_pv[k].to_white_perspective(wtm).as_dict()
-                    for k in sorted(best_by_pv)
-                ]
-                await cache_store(conn, zob, fen, pool.version, ev.depth, snapshot)
+                    payload = {
+                        "type": "done",
+                        "cached": False,
+                        "depth": reached_depth,
+                        "best": item.get("move"),
+                        "lines": lines,
+                    }
+                    await redis.publish(channel, json.dumps(payload))
+                    await set_job_status(conn, job_id, "done", result=payload)
+                    log.info("job %s: computed to depth %s", job_id, reached_depth)
+                    return
+
+                ev: EvalLine = item
+                best_by_pv[ev.multipv] = ev
+                reached_depth = max(reached_depth, ev.depth)
+
+                norm = ev.to_white_perspective(wtm)
+                await redis.publish(channel, json.dumps({"type": "info", **norm.as_dict()}))
+
+                # Persist at checkpoint depths so partial work survives a crash
+                if ev.depth in CHECKPOINT_DEPTHS and ev.multipv == multipv:
+                    snapshot = [
+                        best_by_pv[k].to_white_perspective(wtm).as_dict()
+                        for k in sorted(best_by_pv)
+                    ]
+                    await cache_store(conn, zob, fen, pool.version, ev.depth, snapshot)
+    finally:
+        watcher.cancel()
 
 
 async def handle_play_job(pool: EnginePool, redis, conn, job: dict) -> None:

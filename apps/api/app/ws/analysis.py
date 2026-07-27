@@ -36,14 +36,34 @@ router = APIRouter()
 MAX_LIVE = {"free": 1, "pro": 3, "master": 3}
 
 
+# How long a cancellation marker outlives the request. Only has to cover the
+# worst case of a job sitting queued before a consumer reaches it.
+CANCEL_TTL = 300
+
+
 class ConnectionState:
     """Tracks the pub/sub relay task for one socket."""
 
     def __init__(self) -> None:
         self.relay: asyncio.Task | None = None
         self.job_id: int | None = None
+        # Only live position analyses are ours to abandon. A subscribed
+        # full-game review belongs to the user, not to this socket's cursor,
+        # and must survive them navigating the board.
+        self.cancellable: bool = False
 
     async def cancel(self) -> None:
+        """
+        Drop the relay *and* tell the engine to stop.
+
+        Dropping the relay alone only stops us listening: the job stays on the
+        queue and a worker still runs it to full depth, publishing to a channel
+        with no subscriber. Since the board re-requests analysis on every move,
+        that was a full abandoned search for each position walked past.
+        """
+        job_id, self.job_id = self.job_id, None
+        cancellable, self.cancellable = self.cancellable, False
+
         if self.relay and not self.relay.done():
             self.relay.cancel()
             try:
@@ -51,7 +71,17 @@ class ConnectionState:
             except asyncio.CancelledError:
                 pass
         self.relay = None
-        self.job_id = None
+
+        if job_id is None or not cancellable:
+            return
+        try:
+            redis = get_redis()
+            # The key covers a job still queued; the publish stops one already
+            # running. A job needs whichever of the two arrives first.
+            await redis.setex(f"cancel:{job_id}", CANCEL_TTL, "1")
+            await redis.publish(f"cancel:{job_id}", "1")
+        except Exception:  # never let a cache blip break the socket
+            log.warning("could not signal cancel for job %s", job_id, exc_info=True)
 
 
 async def _relay(ws: WebSocket, job_id: int) -> None:
@@ -153,6 +183,7 @@ async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
                     job_id = job.id
 
                 state.job_id = job_id
+                state.cancellable = True
                 state.relay = asyncio.create_task(_relay(ws, job_id))
 
                 queue = "q:pro" if is_paid(plan) else "q:free"

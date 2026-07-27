@@ -33,7 +33,13 @@ export interface Settings {
 
 export const DEFAULTS: Settings = {
   depth: 22,
-  multipv: 3,
+  // One line by default. MultiPV 3 costs roughly 2-3x MultiPV 1 at the same
+  // depth because the engine cannot prune to a single best line, and it is
+  // requested on every board navigation - so it sized the engine fleet while
+  // most readers only look at the top line. Raising it is one click away in
+  // Analysis settings, and the eval bar and best-move arrow both come from
+  // line 1 regardless.
+  multipv: 1,
   autoAnalyse: true,
   showEvalBar: true,
   showBestArrow: true,
