@@ -19,8 +19,8 @@ from app.core.config import settings
 from app.core.db import engine
 from app.core.redis_client import close_redis, get_redis
 from app.routers import (
-    accounts, admin, analysis, auth, billing, explorer, games, intuition,
-    openings, play, prep, puzzles, training, users,
+    accounts, admin, analysis, auth, billing, explorer, games, insights,
+    intuition, openings, play, prep, puzzles, training, users,
 )
 from app.ws import analysis as ws_analysis
 
@@ -143,6 +143,7 @@ app.include_router(accounts.router)
 app.include_router(games.router)
 app.include_router(analysis.router)
 app.include_router(explorer.router)
+app.include_router(insights.router)
 app.include_router(training.router)
 app.include_router(puzzles.router)
 app.include_router(play.router)

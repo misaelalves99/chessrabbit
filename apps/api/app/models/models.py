@@ -87,6 +87,15 @@ class Game(Base):
     ply_count: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
     movetext: Mapped[str] = mapped_column(Text, nullable=False)
     external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Insights metadata (migration 010). All nullable: games imported before
+    # 010, and reference games, simply do not participate in those charts.
+    user_color: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    termination: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_control: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    played_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     owner: Mapped["User | None"] = relationship(back_populates="games")

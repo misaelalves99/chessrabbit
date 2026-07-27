@@ -35,6 +35,85 @@ def _normalize_headers(pgn_text: str) -> str:
     return re.sub(r'\]\s*\[', ']\n[', pgn_text)
 
 
+def classify_time_control(tc: str | None) -> str:
+    """
+    Bucket a PGN TimeControl into the class players actually think in.
+
+    Uses the standard base + 40 x increment estimate of a game's length, and
+    the same cutoffs Lichess and Chess.com use, so a "blitz" game here is the
+    same game they would call blitz.
+    """
+    if not tc or tc in ("-", "?"):
+        return "unknown"
+    if "/" in tc:  # "1/86400" - moves per day, i.e. correspondence
+        return "correspondence"
+    try:
+        base, _, inc = tc.partition("+")
+        estimate = int(float(base)) + 40 * int(float(inc or 0))
+    except ValueError:
+        return "unknown"
+    if estimate < 179:
+        return "bullet"
+    if estimate < 479:
+        return "blitz"
+    if estimate < 1499:
+        return "rapid"
+    return "classical"
+
+
+# Substring -> normalised reason. Ordered: the first match wins, so the more
+# specific phrases have to come before the words they contain.
+_TERMINATION_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("checkmate", "checkmate"),
+    ("won on time", "timeout"),
+    ("time forfeit", "timeout"),
+    ("timeout", "timeout"),
+    ("resign", "resignation"),
+    ("abandon", "abandoned"),
+    ("agreement", "agreement"),
+    ("agreed", "agreement"),
+    ("stalemate", "stalemate"),
+    ("repetition", "repetition"),
+    ("insufficient", "insufficient"),
+    ("50-move", "fifty_move"),
+    ("fifty", "fifty_move"),
+)
+
+
+def classify_termination(raw: str | None, result: str) -> str | None:
+    """
+    Normalise the free-text Termination header into a fixed vocabulary.
+
+    Platforms phrase this differently ("Normal", "hikaru won by resignation",
+    "Time forfeit"), so we match on substrings. "Normal" carries no reason at
+    all - a decisive Normal game is a resignation in practice, a drawn one an
+    agreement, which is how both platforms use the tag.
+    """
+    if not raw:
+        return None
+    text = raw.lower()
+    for needle, reason in _TERMINATION_PATTERNS:
+        if needle in text:
+            return reason
+    if "normal" in text:
+        return "agreement" if result == "1/2-1/2" else "resignation"
+    return "other"
+
+
+def _safe_datetime(day: str | None, clock: str | None):
+    """Combine PGN date + time headers into an aware UTC datetime, or None."""
+    if not day or not clock:
+        return None
+    from datetime import datetime, timezone
+
+    for fmt in ("%Y.%m.%d %H:%M:%S", "%Y.%m.%d %H:%M"):
+        try:
+            return datetime.strptime(f"{day} {clock}", fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
 def parse_pgn(pgn_text: str) -> list[dict]:
     """
     Parse one or more games from PGN text into dicts ready for insertion.
@@ -62,18 +141,32 @@ def parse_pgn(pgn_text: str) -> list[dict]:
         exporter = chess.pgn.StringExporter(headers=False, variations=True, comments=True)
         movetext = game.accept(exporter).strip()
 
+        result = _safe_result(headers.get("Result", "*"))
+        time_control = headers.get("TimeControl") or None
+
+        # Lichess tags the true kickoff as UTCDate/UTCTime; Chess.com uses
+        # UTCDate + StartTime. Fall back to the local Date/Time pair.
+        played_at = _safe_datetime(
+            headers.get("UTCDate") or headers.get("Date"),
+            headers.get("UTCTime") or headers.get("StartTime") or headers.get("Time"),
+        )
+
         games.append(
             {
                 "white": headers.get("White", "")[:200],
                 "black": headers.get("Black", "")[:200],
                 "white_elo": _safe_int(headers.get("WhiteElo")),
                 "black_elo": _safe_int(headers.get("BlackElo")),
-                "result": _safe_result(headers.get("Result", "*")),
+                "result": result,
                 "event": headers.get("Event", "")[:300],
                 "site": headers.get("Site", "")[:300],
-                "played_on": _safe_date(headers.get("Date")),
+                "played_on": _safe_date(headers.get("UTCDate") or headers.get("Date")),
+                "played_at": played_at,
                 "eco": (headers.get("ECO") or None),
                 "opening": headers.get("Opening") or None,
+                "time_control": time_control[:40] if time_control else None,
+                "time_class": classify_time_control(time_control),
+                "termination": classify_termination(headers.get("Termination"), result),
                 "ply_count": len(moves),
                 "movetext": movetext,
             }

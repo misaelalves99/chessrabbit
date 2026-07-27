@@ -1,13 +1,44 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Chess } from "chess.js";
+import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEngine, formatEval } from "@/hooks/useEngine";
 import { useClickToMove } from "@/hooks/useClickToMove";
+import { useSquareSize } from "@/hooks/useSquareSize";
 import Link from "next/link";
 import { Annotation, api, ApiError, ExplorerMove, ExplorerScope, ReviewSummary } from "@/lib/api";
-import ReviewPanel, { CLASS_META } from "@/components/ReviewPanel";
+import { CLASS_META } from "@/lib/classification";
+import { useBoardTheme } from "@/lib/boardTheme";
+import { updateSettings, useSettings } from "@/lib/settings";
+import ReviewPanel from "@/components/ReviewPanel";
+import EvalBar from "@/components/EvalBar";
+import MoveList from "@/components/MoveList";
+import EnginePane from "@/components/EnginePane";
+import ExplorerPane from "@/components/ExplorerPane";
+
+/** Eval bar width + the gap between it and the board. */
+const BOARD_GUTTER = 28;
+
+/**
+ * Holding an arrow key walks the game faster than any of this can answer.
+ * Waiting for the cursor to settle turns a 40-request burst into one request,
+ * and spares the engine 40 abandoned searches.
+ */
+const SETTLE_MS = 220;
+
+/** Positions keep coming back to the same openings; remembering them makes
+    stepping backwards through a game instant. */
+const EXPLORER_CACHE_MAX = 300;
+
+type Tab = "review" | "moves" | "engine" | "book";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "review", label: "Review" },
+  { id: "moves", label: "Moves" },
+  { id: "engine", label: "Engine" },
+  { id: "book", label: "Book" },
+];
 
 interface Props {
   initialPgn?: string;
@@ -23,7 +54,6 @@ export default function AnalysisBoard({
   initialAnnotations,
 }: Props) {
   // `game` is the authoritative position; history drives the move list.
-  const [game, setGame] = useState(() => new Chess());
   const [history, setHistory] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0); // ply index; 0 = start position
   const [orientation, setOrientation] = useState<"white" | "black">("white");
@@ -31,14 +61,23 @@ export default function AnalysisBoard({
   const [explorerTotal, setExplorerTotal] = useState(0);
   const [explorerScope, setExplorerScope] = useState<ExplorerScope>("reference");
   const [explorerError, setExplorerError] = useState(false);
-  const [autoAnalyse, setAutoAnalyse] = useState(true);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("review");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const explorerCache = useRef(new Map<string, { moves: ExplorerMove[]; total: number }>());
+  const explorerAbort = useRef<AbortController | null>(null);
 
   const engine = useEngine();
+  const settings = useSettings();
+  const skin = useBoardTheme();
+  const autoAnalyse = settings.autoAnalyse;
+
+  // The board is sized to the space it is given, so it fills the viewport
+  // height on a desktop instead of sitting in a fixed-width box.
+  const [stageRef, boardSize] = useSquareSize(BOARD_GUTTER);
 
   // Adopt annotations (and stop any stale poll) when a different game loads
   useEffect(() => {
@@ -88,34 +127,48 @@ export default function AnalysisBoard({
     return m;
   }, [annotations]);
 
-  // from/to squares of every played move, for board highlighting + badges
-  const moveSquares = useMemo(() => {
+  const hasReview = annByPly.size > 0;
+
+  // One replay of the game per move list, not one per cursor step. It yields
+  // both the from/to squares (board highlighting + badges) and the position
+  // after every ply, so moving the cursor is a lookup rather than a rebuild.
+  const { moveSquares, fens } = useMemo(() => {
     const g = new Chess();
-    const out: { from: string; to: string }[] = [];
+    const squares: { from: Square; to: Square }[] = [];
+    const positions: string[] = [g.fen()]; // index 0 = start position
     for (const san of history) {
       try {
         const m = g.move(san);
         if (!m) break;
-        out.push({ from: m.from, to: m.to });
+        squares.push({ from: m.from, to: m.to });
+        positions.push(g.fen());
       } catch {
         break;
       }
     }
-    return out;
+    return { moveSquares: squares, fens: positions };
   }, [history]);
 
   // The move the cursor just played (ply cursor-1) and its review verdict
   const reviewedMove = cursor > 0 ? moveSquares[cursor - 1] : undefined;
-  const reviewedClass =
-    cursor > 0 ? annByPly.get(cursor - 1)?.classification : undefined;
+  const currentAnn = cursor > 0 ? annByPly.get(cursor - 1) : undefined;
+  const reviewedClass = currentAnn?.classification;
 
   const highlightStyles = useMemo(() => {
-    if (!reviewedMove) return {};
+    if (!reviewedMove || !settings.highlightLastMove) return {};
     return {
-      [reviewedMove.from]: { background: "rgba(129,140,248,0.30)" },
-      [reviewedMove.to]: { background: "rgba(129,140,248,0.45)" },
+      [reviewedMove.from]: skin.lastMoveFrom,
+      [reviewedMove.to]: skin.lastMoveTo,
     };
-  }, [reviewedMove]);
+  }, [reviewedMove, settings.highlightLastMove, skin.lastMoveFrom, skin.lastMoveTo]);
+
+  // Show the move the engine wanted instead, right on the board.
+  const arrows = useMemo(() => {
+    const uci = currentAnn?.best_uci;
+    if (!settings.showBestArrow) return [];
+    if (!uci || reviewedClass === "best" || reviewedClass === "book") return [];
+    return [[uci.slice(0, 2) as Square, uci.slice(2, 4) as Square, "#2FE3E8"] as const];
+  }, [currentAnn, reviewedClass, settings.showBestArrow]);
 
   // Square -> top-left percentage within the board, respecting orientation.
   const squarePct = useCallback(
@@ -136,57 +189,70 @@ export default function AnalysisBoard({
     try {
       g.loadPgn(initialPgn);
       setHistory(g.history());
-      const fresh = new Chess();
-      setGame(fresh);
       setCursor(0);
     } catch {
       /* malformed pgn - keep empty board */
     }
   }, [initialPgn]);
 
-  // Rebuild the board position for the current cursor
-  const positionAt = useCallback(
-    (ply: number) => {
-      const g = new Chess();
-      for (let i = 0; i < ply && i < history.length; i++) {
-        try {
-          g.move(history[i]);
-        } catch {
-          break;
-        }
-      }
-      return g;
-    },
-    [history]
-  );
+  // The position at the cursor, straight off the replay above.
+  const fen = fens[Math.min(cursor, fens.length - 1)];
 
-  const board = useMemo(() => positionAt(cursor), [positionAt, cursor]);
-  const fen = board.fen();
-
-  // Ask the engine + explorer whenever the position changes
+  // Ask the engine + explorer once the position stops changing. A cached
+  // explorer answer is applied immediately, so revisiting a position you have
+  // already seen never flickers or waits.
   useEffect(() => {
-    if (autoAnalyse && engine.connected) {
-      engine.analyse(fen, 22, 3);
+    const key = `${explorerScope}:${fen}`;
+    const hit = explorerCache.current.get(key);
+    if (hit) {
+      setExplorer(hit.moves);
+      setExplorerTotal(hit.total);
+      setExplorerError(false);
     }
-    api
-      .explorer(fen, explorerScope)
-      .then((res) => {
-        setExplorer(res.moves);
-        setExplorerTotal(res.total_games);
-        setExplorerError(false);
-      })
-      .catch(() => {
-        setExplorer([]);
-        setExplorerTotal(0);
-        setExplorerError(true);
-      });
+
+    const timer = setTimeout(() => {
+      if (autoAnalyse && engine.connected) {
+        engine.analyse(fen, settings.depth, settings.multipv);
+      }
+      if (hit) return;
+
+      // Only the newest position's answer may land; an older in-flight reply
+      // would otherwise overwrite the panel with the wrong position's book.
+      explorerAbort.current?.abort();
+      const ctrl = new AbortController();
+      explorerAbort.current = ctrl;
+
+      api
+        .explorer(fen, explorerScope, ctrl.signal)
+        .then((res) => {
+          if (explorerCache.current.size >= EXPLORER_CACHE_MAX) {
+            explorerCache.current.clear();
+          }
+          explorerCache.current.set(key, { moves: res.moves, total: res.total_games });
+          setExplorer(res.moves);
+          setExplorerTotal(res.total_games);
+          setExplorerError(false);
+        })
+        .catch(() => {
+          if (ctrl.signal.aborted) return; // superseded, not a failure
+          setExplorer([]);
+          setExplorerTotal(0);
+          setExplorerError(true);
+        });
+    }, SETTLE_MS);
+
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fen, engine.connected, autoAnalyse, explorerScope]);
+  }, [fen, engine.connected, autoAnalyse, explorerScope, settings.depth, settings.multipv]);
+
+  useEffect(() => () => explorerAbort.current?.abort(), []);
 
   // Playing a move from the current cursor truncates any future moves
   const onDrop = useCallback(
     (from: string, to: string) => {
-      const g = positionAt(cursor);
+      // Starting from the cursor's FEN is enough to validate and name the
+      // move, and avoids replaying the game to get there.
+      const g = new Chess(fen);
       let move;
       try {
         move = g.move({ from, to, promotion: "q" });
@@ -200,27 +266,41 @@ export default function AnalysisBoard({
       setCursor(next.length);
       return true;
     },
-    [cursor, history, positionAt]
+    [cursor, history, fen]
   );
 
   const { onSquareClick, squareStyles } = useClickToMove(fen, onDrop);
 
+  const goStart = useCallback(() => setCursor(0), []);
+  const goBack = useCallback(() => setCursor((c) => Math.max(0, c - 1)), []);
+  const goNext = useCallback(
+    () => setCursor((c) => Math.min(history.length, c + 1)),
+    [history.length]
+  );
+  const goEnd = useCallback(() => setCursor(history.length), [history.length]);
+  const flip = useCallback(
+    () => setOrientation((o) => (o === "white" ? "black" : "white")),
+    []
+  );
+
   // Keyboard navigation, like every serious chess GUI
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") setCursor((c) => Math.max(0, c - 1));
-      if (e.key === "ArrowRight") setCursor((c) => Math.min(history.length, c + 1));
-      if (e.key === "ArrowUp") setCursor(0);
-      if (e.key === "ArrowDown") setCursor(history.length);
-      if (e.key === "f") setOrientation((o) => (o === "white" ? "black" : "white"));
+      const el = e.target as HTMLElement | null;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      if (e.key === "ArrowLeft") goBack();
+      if (e.key === "ArrowRight") goNext();
+      if (e.key === "ArrowUp") goStart();
+      if (e.key === "ArrowDown") goEnd();
+      if (e.key === "f") flip();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [history.length]);
+  }, [goBack, goNext, goStart, goEnd, flip]);
 
   const best = engine.lines[0];
   const evalText = formatEval(best);
-  const whiteAdvantage = (best?.cp ?? 0) >= 0;
+  const whiteAdvantage = (best?.cp ?? 0) >= 0 && (best?.mate ?? 0) >= 0;
 
   // Eval bar height: clamp centipawns to a readable range
   const barPct = useMemo(() => {
@@ -229,34 +309,55 @@ export default function AnalysisBoard({
     return Math.max(2, Math.min(98, 50 + cp / 20));
   }, [best]);
 
-  return (
-    <div className="flex flex-col lg:flex-row gap-4 p-4 min-h-screen text-ink">
-      {/* ---------- Board column ---------- */}
-      <div className="flex gap-2">
-        {/* Eval bar */}
-        <div className="w-6 h-[min(92vw,480px)] bg-black rounded overflow-hidden flex flex-col-reverse shrink-0">
-          <div
-            className="bg-white transition-all duration-300"
-            style={{ height: `${barPct}%` }}
-          />
-        </div>
+  const badge = Math.max(16, Math.min(30, boardSize * 0.062));
 
-        <div>
-          <div className="w-[min(92vw,480px)] relative">
-            <Chessboard
-              position={fen}
-              onPieceDrop={onDrop}
-              onSquareClick={onSquareClick}
-              boardOrientation={orientation}
-              customBoardStyle={{ borderRadius: "4px" }}
-              customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
-              customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
-              customSquareStyles={{ ...highlightStyles, ...squareStyles }}
+  return (
+    <div className="flex flex-col lg:h-full lg:flex-row">
+      {/* ---------- Board stage: fills the workspace, top to bottom ---------- */}
+      {/* Outer box owns the padding so the measured inner box is the content
+          box - on a desktop there is none, and the board meets both edges. */}
+      <div
+        className="w-full aspect-square px-3 lg:aspect-auto lg:h-full lg:min-h-0
+                   lg:w-auto lg:min-w-0 lg:flex-1 lg:px-0"
+      >
+        <div
+          ref={stageRef}
+          className="relative flex h-full w-full items-center justify-center gap-2"
+        >
+          {settings.showEvalBar && (
+            <EvalBar
+              pct={barPct}
+              text={evalText}
+              whiteAhead={whiteAdvantage}
+              flipped={orientation === "black"}
+              height={boardSize}
             />
-            {/* Classification badge on the destination square (chess.com-style) */}
-            {reviewedMove && reviewedClass && (
+          )}
+
+          <div
+            className="relative"
+            style={{ width: boardSize || undefined, height: boardSize || undefined }}
+          >
+            {boardSize > 0 && (
+              <Chessboard
+                position={fen}
+                boardWidth={boardSize}
+                onPieceDrop={onDrop}
+                onSquareClick={onSquareClick}
+                boardOrientation={orientation}
+                customArrows={arrows.map((a) => [...a] as [Square, Square, string])}
+                customArrowColor="#2FE3E8"
+                customNotationStyle={{ fontSize: "10px", fontWeight: "600" }}
+                animationDuration={skin.animationMs}
+                {...skin.props}
+                customSquareStyles={{ ...highlightStyles, ...squareStyles }}
+              />
+            )}
+
+            {/* Verdict badge on the destination square */}
+            {settings.showVerdictBadge && reviewedMove && reviewedClass && (
               <div
-                className="absolute z-10 pointer-events-none"
+                className="pointer-events-none absolute z-10 animate-pop"
                 style={{
                   left: `${squarePct(reviewedMove.to).left + 12.5}%`,
                   top: `${squarePct(reviewedMove.to).top}%`,
@@ -264,15 +365,15 @@ export default function AnalysisBoard({
                 }}
               >
                 <span
-                  className="flex items-center justify-center rounded-full text-white font-bold shadow-md ring-2 ring-black/20"
+                  className="flex items-center justify-center rounded-full font-bold text-white shadow-md ring-2 ring-black/25"
                   style={{
                     background: CLASS_META[reviewedClass].bg,
-                    width: "clamp(18px, 5.2vw, 26px)",
-                    height: "clamp(18px, 5.2vw, 26px)",
+                    width: badge,
+                    height: badge,
                     fontSize:
                       CLASS_META[reviewedClass].glyph.length > 1
-                        ? "clamp(9px, 2.4vw, 12px)"
-                        : "clamp(11px, 3vw, 15px)",
+                        ? badge * 0.45
+                        : badge * 0.58,
                   }}
                 >
                   {CLASS_META[reviewedClass].glyph}
@@ -280,245 +381,140 @@ export default function AnalysisBoard({
               </div>
             )}
           </div>
+        </div>
+      </div>
 
-          {/* Controls: one segmented cluster, centred under the board */}
-          <div className="relative flex items-center justify-center gap-2 mt-3">
-            <div className="inline-flex rounded-lg overflow-hidden border border-white/10 bg-white/5 divide-x divide-white/10">
+      {/* ---------- Analysis panel ---------- */}
+      <aside
+        className="flex w-full shrink-0 flex-col border-white/[0.07] bg-panel/60 backdrop-blur-xl
+                   border-t lg:h-full lg:w-[352px] lg:border-l lg:border-t-0 xl:w-[400px]"
+      >
+        {/* Header: what you are looking at */}
+        <div className="shrink-0 border-b border-white/[0.06] px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="eyebrow">Game review</span>
+            <span className="ml-auto font-mono text-[11px] text-muted">
+              {cursor}/{history.length}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-sm font-medium" title={gameLabel}>
+            {gameLabel ?? "Free analysis board"}
+          </p>
+        </div>
+
+        {/* Tabs */}
+        <div className="shrink-0 px-3 pt-2.5">
+          <div className="seg w-full justify-between">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                aria-pressed={tab === t.id}
+                className={`seg-item flex-1 text-center text-xs ${
+                  tab === t.id ? "seg-item-on" : ""
+                }`}
+              >
+                {t.label}
+                {t.id === "moves" && history.length > 0 && (
+                  <span className="ml-1 text-[10px] opacity-60">{history.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Scrolling body */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {reviewNotice && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-xs">
+              <span>⏳ {reviewNotice}</span>
+              <Link href="/pricing" className="ml-auto shrink-0 text-gold underline">
+                See plans
+              </Link>
+            </div>
+          )}
+
+          {tab === "review" && (
+            <ReviewPanel
+              history={history}
+              annotations={annotations}
+              summary={reviewSummary}
+              cursor={cursor}
+              onSeek={setCursor}
+              reviewing={reviewing}
+              onRun={runReview}
+              canRun={gameId != null}
+            />
+          )}
+          {tab === "moves" && (
+            <MoveList
+              history={history}
+              annByPly={annByPly}
+              cursor={cursor}
+              onSeek={setCursor}
+            />
+          )}
+          {tab === "engine" && (
+            <EnginePane
+              lines={engine.lines}
+              depth={engine.depth}
+              connected={engine.connected}
+              thinking={engine.thinking}
+              error={engine.error}
+              autoAnalyse={autoAnalyse}
+              onToggleAuto={(autoAnalyse) => updateSettings({ autoAnalyse })}
+            />
+          )}
+          {tab === "book" && (
+            <ExplorerPane
+              moves={explorer}
+              total={explorerTotal}
+              scope={explorerScope}
+              onScope={setExplorerScope}
+              error={explorerError}
+              onPlay={(uci) => onDrop(uci.slice(0, 2), uci.slice(2, 4))}
+            />
+          )}
+        </div>
+
+        {/* Transport controls: pinned to the panel on a desktop, and stuck to
+            the bottom of the viewport while scrolling on a phone. */}
+        <div className="sticky bottom-0 shrink-0 border-t border-white/[0.06] bg-panel/90 p-2.5 backdrop-blur-xl lg:static lg:bg-transparent lg:backdrop-blur-none">
+          {hasReview && cursor < history.length && (
+            <button className="btn-go mb-2 w-full text-sm" onClick={goNext}>
+              Next move  →
+            </button>
+          )}
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 divide-x divide-white/10 overflow-hidden rounded-lg border border-white/10 bg-white/[0.05]">
               {[
-                { glyph: "«", title: "Start (↑)", go: () => setCursor(0) },
-                { glyph: "‹", title: "Back (←)", go: () => setCursor((c) => Math.max(0, c - 1)) },
-                { glyph: "›", title: "Forward (→)", go: () => setCursor((c) => Math.min(history.length, c + 1)) },
-                { glyph: "»", title: "End (↓)", go: () => setCursor(history.length) },
+                { glyph: "«", title: "Start (↑)", go: goStart },
+                { glyph: "‹", title: "Back (←)", go: goBack },
+                { glyph: "›", title: "Forward (→)", go: goNext },
+                { glyph: "»", title: "End (↓)", go: goEnd },
               ].map((b) => (
                 <button
                   key={b.glyph}
                   onClick={b.go}
                   title={b.title}
-                  className="px-4 py-1.5 text-lg leading-none text-muted hover:text-ink hover:bg-white/10 transition-colors"
+                  aria-label={b.title}
+                  className="flex-1 py-1.5 text-lg leading-none text-muted transition-colors hover:bg-white/10 hover:text-ink"
                 >
                   {b.glyph}
                 </button>
               ))}
             </div>
             <button
-              onClick={() => setOrientation((o) => (o === "white" ? "black" : "white"))}
+              onClick={flip}
               title="Flip board (f)"
-              className="px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 text-lg leading-none text-muted hover:text-ink hover:bg-white/10 transition-colors"
+              aria-label="Flip board"
+              className="rounded-lg border border-white/10 bg-white/[0.05] px-3 py-1.5 text-lg leading-none text-muted transition-colors hover:bg-white/10 hover:text-ink"
             >
               ⟳
             </button>
-            <span className="absolute right-0 text-xs text-muted font-mono">
-              {cursor}/{history.length}
-            </span>
           </div>
         </div>
-      </div>
-
-      {/* ---------- Right panel ---------- */}
-      <div className="flex-1 flex flex-col gap-4 min-w-[320px] max-w-[560px]">
-        {gameLabel && (
-          <div className="text-sm text-muted border-b border-white/10 pb-2">
-            {gameLabel}
-          </div>
-        )}
-
-        {/* Engine pane */}
-        <section className="bg-panelAlt rounded p-3">
-          <header className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm">Engine</span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  engine.connected ? "bg-accent" : "bg-red-500"
-                }`}
-                title={engine.connected ? "connected" : "disconnected"}
-              />
-              {engine.thinking && (
-                <span className="text-xs text-muted animate-pulse">thinking…</span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <span
-                className={`font-mono text-lg ${
-                  whiteAdvantage ? "text-white" : "text-red-400"
-                }`}
-              >
-                {evalText}
-              </span>
-              <span className="text-xs text-muted">d{engine.depth}</span>
-            </div>
-          </header>
-
-          <label className="flex items-center gap-2 text-xs text-muted mb-2">
-            <input
-              type="checkbox"
-              checked={autoAnalyse}
-              onChange={(e) => setAutoAnalyse(e.target.checked)}
-            />
-            Auto-analyse on move
-          </label>
-
-          {engine.error && (
-            <div className="text-xs text-red-400 mb-2">{engine.error}</div>
-          )}
-
-          <ol className="space-y-1">
-            {engine.lines.map((line) => (
-              <li key={line.multipv} className="text-xs font-mono flex gap-2">
-                <span className="text-accent w-12 shrink-0">
-                  {formatEval(line)}
-                </span>
-                <span className="text-muted truncate">{line.pv.slice(0, 8).join(" ")}</span>
-              </li>
-            ))}
-            {engine.lines.length === 0 && (
-              <li className="text-xs text-muted">No analysis yet.</li>
-            )}
-          </ol>
-        </section>
-
-        {/* Game review */}
-        {reviewNotice && (
-          <div className="bg-gold/10 border border-gold/30 rounded-lg px-3 py-2 text-xs flex items-center gap-2">
-            <span>⏳ {reviewNotice}</span>
-            <Link href="/pricing" className="text-gold underline ml-auto shrink-0">
-              See plans
-            </Link>
-          </div>
-        )}
-        <ReviewPanel
-          history={history}
-          annotations={annotations}
-          summary={reviewSummary}
-          cursor={cursor}
-          onSeek={setCursor}
-          reviewing={reviewing}
-          onRun={runReview}
-          canRun={gameId != null}
-        />
-
-        {/* Move list */}
-        <section className="bg-panelAlt rounded p-3 flex-1 overflow-auto max-h-64">
-          <h3 className="font-semibold text-sm mb-2">Moves</h3>
-          <div className="flex flex-wrap gap-x-2 gap-y-1 text-sm font-mono">
-            {history.map((san, i) => {
-              const cls = annByPly.get(i)?.classification;
-              const meta = cls ? CLASS_META[cls] : null;
-              return (
-                <span key={i} className="flex items-center gap-1">
-                  {i % 2 === 0 && (
-                    <span className="text-muted">{Math.floor(i / 2) + 1}.</span>
-                  )}
-                  <button
-                    onClick={() => setCursor(i + 1)}
-                    title={annByPly.get(i)?.review ?? undefined}
-                    className={`px-1 rounded hover:bg-white/10 ${
-                      cursor === i + 1 ? "bg-accent text-black" : meta?.color ?? ""
-                    }`}
-                  >
-                    {san}
-                    {meta?.glyph && (
-                      <span className="ml-0.5 text-[0.7em] align-super">{meta.glyph}</span>
-                    )}
-                  </button>
-                </span>
-              );
-            })}
-            {history.length === 0 && (
-              <span className="text-muted text-xs">
-                Drag a piece to start a line.
-              </span>
-            )}
-          </div>
-        </section>
-
-        {/* Opening explorer */}
-        <section className="bg-panelAlt rounded p-3">
-          <h3 className="font-semibold text-sm mb-2">
-            <span className="mr-2 flex flex-wrap gap-x-1.5 items-baseline">
-              <button
-                onClick={() => setExplorerScope("reference")}
-                className={explorerScope === "reference" ? "text-accent" : "text-muted hover:text-ink"}
-              >
-                Masters
-              </button>
-              <span className="text-muted">·</span>
-              <button
-                onClick={() => setExplorerScope("lichess_live")}
-                className={explorerScope === "lichess_live" ? "text-accent" : "text-muted hover:text-ink"}
-                title="Live from Lichess's Opening Explorer API"
-              >
-                Masters (live)
-              </button>
-              <span className="text-muted">·</span>
-              <button
-                onClick={() => setExplorerScope("mine")}
-                className={explorerScope === "mine" ? "text-accent" : "text-muted hover:text-ink"}
-              >
-                My games
-              </button>
-            </span>{" "}
-            <span className="text-muted font-normal text-xs">
-              {explorerTotal.toLocaleString()} games
-              {explorerScope === "lichess_live" && (
-                <span className="ml-1 text-accent" title="Fetched live from Lichess">
-                  ● live
-                </span>
-              )}
-            </span>
-          </h3>
-          {explorer.length === 0 ? (
-            <p className="text-xs text-muted">
-              {explorerError && explorerScope === "lichess_live"
-                ? "Live Lichess explorer is unavailable right now — try again shortly."
-                : explorerScope === "mine"
-                  ? "None of your games reached this position yet."
-                  : explorerScope === "lichess_live"
-                    ? "No master games have reached this position on Lichess."
-                    : "No reference games for this position. Load games via pipeline/load_lichess_api.py to populate the explorer."}
-            </p>
-          ) : (
-            <table className="w-full text-xs">
-              <thead className="text-muted">
-                <tr>
-                  <th className="text-left font-normal">Move</th>
-                  <th className="text-right font-normal">Games</th>
-                  <th className="text-left font-normal pl-2">W / D / B</th>
-                </tr>
-              </thead>
-              <tbody>
-                {explorer.slice(0, 8).map((m) => (
-                  <tr key={m.uci} className="hover:bg-white/5">
-                    <td className="font-mono py-0.5">{m.san}</td>
-                    <td className="text-right text-muted">
-                      {m.games.toLocaleString()}
-                    </td>
-                    <td className="pl-2">
-                      <div className="flex h-3 rounded overflow-hidden w-full min-w-[100px]">
-                        <div
-                          style={{ width: `${m.white_pct}%` }}
-                          className="bg-white"
-                          title={`White ${m.white_pct}%`}
-                        />
-                        <div
-                          style={{ width: `${m.draw_pct}%` }}
-                          className="bg-gray-500"
-                          title={`Draw ${m.draw_pct}%`}
-                        />
-                        <div
-                          style={{ width: `${m.black_pct}%` }}
-                          className="bg-black"
-                          title={`Black ${m.black_pct}%`}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-      </div>
+      </aside>
     </div>
   );
 }

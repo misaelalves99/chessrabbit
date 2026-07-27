@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { useBoardTheme } from "@/lib/boardTheme";
 import { api, getAccessToken } from "@/lib/api";
 import { useClickToMove } from "@/hooks/useClickToMove";
 
@@ -29,6 +30,7 @@ function uciToMove(uci: string) {
 const HINT_STYLE = { background: "rgba(255, 213, 79, 0.55)" };
 
 export default function PlayPage() {
+  const skin = useBoardTheme();
   const router = useRouter();
   const game = useRef(new Chess());
   const colorRef = useRef<Color>("white");
@@ -203,9 +205,9 @@ export default function PlayPage() {
             onSquareClick={onSquareClick}
             boardOrientation={orientation}
             arePiecesDraggable={canMove}
-            customBoardStyle={{ borderRadius: "4px" }}
-            customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
-            customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
+            {...skin.props}
+
+            animationDuration={skin.animationMs}
             customSquareStyles={{ ...hintStyles, ...squareStyles }}
           />
         </div>

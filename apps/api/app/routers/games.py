@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.config import settings
 from app.core.db import get_db
@@ -16,6 +17,7 @@ from app.schemas import (
     AnnotationIn, AnnotationOut, CollectionIn, CollectionOut,
     GameDetail, GameOut, GameUpdate, ImportPgnRequest, ImportResult,
 )
+from app.services.importers import color_played, user_identities
 
 router = APIRouter(tags=["games"])
 
@@ -37,7 +39,20 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     limit = min(limit, 100)
-    stmt = select(Game).where(Game.owner_id == user.id)
+    # The list only ever renders GameOut. Without this the query also drags
+    # back every game's full movetext - by far the widest column in the table -
+    # which is then discarded during serialisation.
+    stmt = (
+        select(Game)
+        .options(
+            load_only(
+                Game.id, Game.white, Game.black, Game.white_elo, Game.black_elo,
+                Game.result, Game.event, Game.played_on, Game.eco, Game.opening,
+                Game.ply_count,
+            )
+        )
+        .where(Game.owner_id == user.id)
+    )
 
     if collection is not None:
         stmt = stmt.join(CollectionGame, CollectionGame.game_id == Game.id).where(
@@ -84,10 +99,17 @@ async def import_games(
 
     ids: list[int] = []
     errors: list[str] = []
+    # Lets Insights count a hand-pasted game as yours when the PGN names you.
+    identities = await user_identities(db, user)
 
     for entry in parsed:
         try:
-            game = Game(owner_id=user.id, source="user", **entry)
+            game = Game(
+                owner_id=user.id,
+                source="user",
+                user_color=color_played(entry, identities),
+                **entry,
+            )
             db.add(game)
             await db.flush()
             ids.append(game.id)

@@ -1,62 +1,162 @@
-/* Loaded client-side; degrades gracefully to the system stack if blocked. */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+/* Fonts are self-hosted via next/font in layout.tsx - see the note there.
+   They must not be @import-ed here: an @import in the app's own stylesheet
+   cannot start downloading until globals.css has been fetched and parsed,
+   which puts a third-party round trip on the critical path of every page. */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html,
+  body {
+    background-color: theme("colors.night");
+  }
+
+  /* Numbers that change in place (evals, clocks, move counters) must not
+     jitter as digits swap. */
+  .font-mono,
+  code,
+  kbd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Visible focus everywhere, without the default browser halo. */
+  :focus-visible {
+    outline: 2px solid theme("colors.accent");
+    outline-offset: 2px;
+  }
+}
+
 @layer components {
+  /* ---------- Surfaces ---------- */
+  .card {
+    @apply bg-panel/85 border border-white/[0.07] rounded-2xl shadow-edge backdrop-blur-sm;
+  }
+  .card-tight {
+    @apply bg-panelAlt/70 border border-white/[0.06] rounded-xl;
+  }
+
+  /* ---------- Controls ---------- */
   .btn {
-    @apply px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm text-ink/90
+    @apply px-3 py-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-sm text-ink
            transition-all duration-150
-           hover:bg-white/10 hover:border-white/20 hover:-translate-y-px
-           active:translate-y-0;
+           hover:bg-white/[0.12] hover:border-white/20 hover:-translate-y-px
+           active:translate-y-0
+           disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply relative px-4 py-2 rounded-lg text-white font-semibold shadow-glow
+           transition-all duration-150
+           hover:-translate-y-px hover:shadow-glow-lg
+           active:translate-y-0 active:shadow-glow
+           disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none;
+    background-image: linear-gradient(135deg, #7c6bff 0%, #a855f7 55%, #6366f1 100%);
+  }
+  /* The one green "keep going" action, borrowed from every review UI. */
+  .btn-go {
+    @apply px-4 py-2 rounded-lg text-[#07240b] font-bold
+           transition-all duration-150
+           hover:-translate-y-px hover:brightness-110
+           active:translate-y-0
+           disabled:opacity-40 disabled:pointer-events-none;
+    background-image: linear-gradient(135deg, #8fe561 0%, #62c93f 100%);
+    box-shadow: 0 2px 12px rgba(127, 216, 88, 0.3);
   }
   .input {
     @apply w-full px-3 py-2 rounded-lg bg-panelAlt/70 border border-white/10 text-ink
            placeholder:text-muted transition-all duration-150
            focus:outline-none focus:border-accent/70 focus:ring-2 focus:ring-accent/25;
   }
-  .btn-primary {
-    @apply px-4 py-2 rounded-lg text-white font-semibold shadow-glow
-           transition-all duration-150
-           hover:-translate-y-px hover:shadow-glow-lg
-           active:translate-y-0 active:shadow-glow
-           disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none;
-    background-image: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+
+  /* Segmented control: nav pills, section tabs, scope switches. */
+  .seg {
+    @apply inline-flex items-center gap-0.5 bg-white/[0.05] border border-white/[0.07]
+           rounded-full p-1;
+  }
+  .seg-item {
+    @apply px-3 py-1 rounded-full text-sm text-muted transition-colors
+           hover:text-ink hover:bg-white/[0.07];
+  }
+  .seg-item-on {
+    @apply bg-accent/20 text-accent font-medium hover:bg-accent/20 hover:text-accent;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 text-[10px] uppercase tracking-wider
+           rounded-full px-2 py-0.5;
+  }
+
+  /* Section heading inside a panel: small, quiet, always the same. */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-muted;
   }
 }
 
-html,
-body {
-  background-color: #12141f;
+/* Ambient light. Three blooms keep the page from reading as one flat plane;
+   kept dim and behind everything, since this app is stared at for hours.
+
+   Deliberately static. These blooms sit underneath every backdrop-blur surface
+   in the app (header, games rail, analysis panel, transport bar), and a
+   backdrop-filter has to recompute whenever the pixels behind it move. Drifting
+   them meant re-blurring most of the chrome on every frame, for the whole
+   session - an animation nobody consciously notices, paid for continuously. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(46% 38% at 10% 0%, rgba(124, 107, 255, 0.3), transparent 62%),
+    radial-gradient(40% 34% at 96% 8%, rgba(47, 227, 232, 0.19), transparent 60%),
+    radial-gradient(52% 40% at 60% 108%, rgba(168, 85, 247, 0.2), transparent 62%);
 }
 
-/* Two faint ambient glows keep the page from reading as one flat plane.
-   Kept deliberately dim: this app is stared at for hours. */
-body {
+/* A faint grid gives the dark field some texture and scale. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
   background-image:
-    radial-gradient(640px 420px at 12% -6%, rgba(99, 102, 241, 0.1), transparent 60%),
-    radial-gradient(720px 520px at 108% 12%, rgba(34, 211, 238, 0.06), transparent 55%);
-  background-attachment: fixed;
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(80% 60% at 50% 40%, #000, transparent 100%);
 }
 
 ::selection {
-  background: rgba(129, 140, 248, 0.35);
+  background: rgba(139, 124, 255, 0.35);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a3052 transparent;
+  scrollbar-color: #2c3454 transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #2a3052;
+  background: #2c3454;
   border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a4470;
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

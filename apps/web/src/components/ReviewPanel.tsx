@@ -1,52 +1,20 @@
 "use client";
 
 /**
- * Game Review panel: accuracy summary, per-move classification counts,
- * evaluation graph (click to seek), and a "why" box for the current move.
- * All content comes from the server's engine review - no client analysis.
+ * Game Review: the coach's verdict on the move you are looking at, an accuracy
+ * summary, a clickable evaluation curve, and per-side verdict counts.
+ * Everything here comes from the server's engine review - no client analysis.
  */
 
 import { useMemo, useRef } from "react";
 import { Chess } from "chess.js";
 import { Annotation, Classification, ReviewSummary } from "@/lib/api";
-
-export const CLASS_META: Record<
-  Classification,
-  { glyph: string; color: string; label: string; bg: string }
-> = {
-  book: { glyph: "📖", color: "text-[#c8a878]", label: "Book", bg: "#a3865f" },
-  best: { glyph: "★", color: "text-accent", label: "Best", bg: "#818CF8" },
-  excellent: { glyph: "✓", color: "text-green-300", label: "Excellent", bg: "#81b64c" },
-  good: { glyph: "✓", color: "text-green-200", label: "Good", bg: "#7a9b57" },
-  inaccuracy: { glyph: "?!", color: "text-yellow-300", label: "Inaccuracy", bg: "#e0a63c" },
-  mistake: { glyph: "?", color: "text-orange-400", label: "Mistake", bg: "#e07a3c" },
-  blunder: { glyph: "??", color: "text-red-400", label: "Blunder", bg: "#d9534f" },
-};
-
-/** Chess.com-style headline: name the move and its verdict. */
-function headline(san: string, cls: Classification): string {
-  switch (cls) {
-    case "book":
-      return `${san} is a book move`;
-    case "best":
-      return `${san} is the best move`;
-    case "excellent":
-      return `${san} is excellent`;
-    case "good":
-      return `${san} is a good move`;
-    case "inaccuracy":
-      return `${san} is an inaccuracy`;
-    case "mistake":
-      return `${san} is a mistake`;
-    case "blunder":
-      return `${san} is a blunder`;
-  }
-}
+import { CLASS_META, CLASS_ORDER, headline } from "@/lib/classification";
 
 const DOT_FILL: Partial<Record<Classification, string>> = {
-  inaccuracy: "#fde047",
-  mistake: "#fb923c",
-  blunder: "#f87171",
+  inaccuracy: "#FFC53D",
+  mistake: "#FF9F3D",
+  blunder: "#FF5F63",
 };
 
 /** Same logistic centipawn -> win% mapping the server uses. */
@@ -163,71 +131,163 @@ export default function ReviewPanel({
     }
   }, [current, cursor, history]);
 
-  const countRows: Classification[] = [
-    "best",
-    "excellent",
-    "good",
-    "book",
-    "inaccuracy",
-    "mistake",
-    "blunder",
-  ];
-
   return (
-    <section className="bg-panelAlt rounded p-3">
-      <header className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-sm">Game review</h3>
-        {canRun && (
-          <button className="btn text-xs" onClick={onRun} disabled={reviewing}>
-            {reviewing ? "Reviewing…" : hasReview ? "Re-run review" : "▶ Review game"}
-          </button>
-        )}
-      </header>
+    <div className="space-y-3">
+      {/* ---------- Coach callout ---------- */}
+      <div className="flex items-start gap-2.5">
+        <div
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-xl
+                     bg-gradient-to-br from-accent/30 to-accent2/20 ring-1 ring-white/10"
+          aria-hidden
+        >
+          🐰
+        </div>
 
-      {!hasReview && !reviewing && (
-        <p className="text-xs text-muted">
-          {canRun
-            ? "Run a full review: every move classified and explained, with accuracy scores."
-            : "Open one of your games to run a full review."}
-        </p>
-      )}
-      {reviewing && (
-        <p className="text-xs text-muted animate-pulse">
-          The engine is going through every move…
-        </p>
-      )}
-
-      {summary && hasReview && (
-        <div className="flex gap-4 mb-2 text-sm">
-          {(["white", "black"] as const).map((side) => (
-            <div key={side} className="flex items-center gap-2">
+        {current && currentMeta ? (
+          <div
+            key={cursor}
+            className="relative flex-1 animate-rise rounded-2xl rounded-tl-sm bg-panelAlt/90 p-3
+                       ring-1 ring-white/[0.08] shadow-card"
+            style={{ borderLeft: `3px solid ${currentMeta.bg}` }}
+          >
+            <div className="flex items-center gap-2">
               <span
-                className={`w-3 h-3 rounded-sm border border-white/30 ${
-                  side === "white" ? "bg-white" : "bg-black"
-                }`}
-              />
-              <span className="text-muted text-xs">{side}</span>
-              <span className="font-mono font-semibold">
-                {summary.accuracy[side].toFixed(1)}%
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-full font-bold text-white animate-pop"
+                style={{
+                  background: currentMeta.bg,
+                  fontSize: currentMeta.glyph.length > 1 ? 11 : 14,
+                }}
+              >
+                {currentMeta.glyph}
+              </span>
+              <span className="text-sm font-semibold leading-tight">
+                {headline(history[cursor - 1] ?? "", current.classification!)}
+              </span>
+              <span className="ml-auto shrink-0 rounded-md bg-black/30 px-1.5 py-0.5 font-mono text-xs">
+                {evalText(current.eval_cp)}
               </span>
             </div>
+
+            {current.review && (
+              <p className="mt-2 text-xs leading-relaxed text-ink/75">{current.review}</p>
+            )}
+            {bestSan &&
+              current.classification !== "best" &&
+              current.classification !== "book" && (
+                <p className="mt-1.5 text-xs text-accent">
+                  Best was <span className="font-mono font-semibold">{bestSan}</span>
+                </p>
+              )}
+          </div>
+        ) : (
+          <div className="flex-1 rounded-2xl rounded-tl-sm bg-panelAlt/70 p-3 ring-1 ring-white/[0.06]">
+            <p className="text-sm font-semibold">
+              {reviewing
+                ? "Going through every move…"
+                : hasReview
+                  ? "Step through the game"
+                  : canRun
+                    ? "Ready when you are"
+                    : "Open a game to review it"}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              {reviewing
+                ? "The engine is scoring both sides. This takes a few seconds."
+                : hasReview
+                  ? "Pick a move and I'll tell you what happened."
+                  : canRun
+                    ? "I'll classify every move, score both sides, and show you what you missed."
+                    : "Pick one of your games from the rail — or import a PGN — and I'll review it."}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {canRun && (
+        <button
+          className={`w-full text-sm ${hasReview ? "btn" : "btn-primary"}`}
+          onClick={onRun}
+          disabled={reviewing}
+        >
+          {reviewing ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 animate-ping rounded-full bg-white" />
+              Reviewing…
+            </span>
+          ) : hasReview ? (
+            "Re-run review"
+          ) : (
+            "▶  Review this game"
+          )}
+        </button>
+      )}
+
+      {/* ---------- Accuracy ---------- */}
+      {summary && hasReview && (
+        <div className="grid grid-cols-2 gap-2">
+          {(["white", "black"] as const).map((side) => (
+            <div
+              key={side}
+              className="card-tight flex items-center gap-2 px-2.5 py-2"
+            >
+              <span
+                className={`h-3.5 w-3.5 shrink-0 rounded-[3px] ring-1 ring-white/30 ${
+                  side === "white" ? "bg-white" : "bg-[#0B1020]"
+                }`}
+              />
+              <div className="min-w-0">
+                <div className="font-display text-lg font-bold leading-none">
+                  {summary.accuracy[side].toFixed(1)}
+                  <span className="text-xs text-muted">%</span>
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-muted">
+                  {side} accuracy
+                </div>
+              </div>
+            </div>
           ))}
-          <span className="text-xs text-muted self-center">accuracy</span>
         </div>
       )}
 
+      {/* ---------- Eval curve ---------- */}
       {graph && (
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          className="w-full h-20 rounded cursor-crosshair bg-black/40 mb-2"
+          preserveAspectRatio="none"
+          className="h-20 w-full cursor-crosshair rounded-xl bg-[#0B1020] ring-1 ring-white/[0.06]"
           onPointerDown={seekFromPointer}
           onPointerMove={(e) => e.buttons === 1 && seekFromPointer(e)}
+          role="img"
+          aria-label="Evaluation over the course of the game — click to jump to a move"
         >
-          <path d={graph.path} fill="#E3E6F2" opacity={0.9} />
-          <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="#8E96B3" strokeWidth={0.5} strokeDasharray="2 3" />
+          <defs>
+            <linearGradient id="evalFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.95" />
+              <stop offset="100%" stopColor="#B9C2E6" stopOpacity="0.75" />
+            </linearGradient>
+          </defs>
+          <path d={graph.path} fill="url(#evalFill)" />
+          <line
+            x1={0}
+            y1={H / 2}
+            x2={W}
+            y2={H / 2}
+            stroke="#8B7CFF"
+            strokeWidth={0.6}
+            strokeDasharray="3 3"
+            opacity={0.7}
+          />
           {graph.dots.map((d) => (
-            <circle key={d.ply} cx={d.x} cy={d.y} r={3} fill={d.fill} stroke="#191C2B" strokeWidth={1} />
+            <circle
+              key={d.ply}
+              cx={d.x}
+              cy={d.y}
+              r={3}
+              fill={d.fill}
+              stroke="#0B1020"
+              strokeWidth={1}
+            />
           ))}
           {cursor > 0 && (
             <line
@@ -235,86 +295,41 @@ export default function ReviewPanel({
               y1={0}
               x2={(cursor / N) * W}
               y2={H}
-              stroke="#818CF8"
+              stroke="#2FE3E8"
               strokeWidth={1.5}
             />
           )}
         </svg>
       )}
 
-      {current && currentMeta && (
-        <div
-          className="rounded-lg p-3 mb-2 bg-black/30"
-          style={{ borderLeft: `4px solid ${currentMeta.bg}` }}
-        >
-          {/* Coach callout: badge + move name + eval */}
-          <div className="flex items-center gap-2">
-            <span
-              className="flex items-center justify-center rounded-full text-white shrink-0"
-              style={{
-                background: currentMeta.bg,
-                width: 24,
-                height: 24,
-                fontSize: currentMeta.glyph.length > 1 ? 11 : 14,
-                lineHeight: 1,
-              }}
-            >
-              {currentMeta.glyph}
-            </span>
-            <span className="font-semibold text-sm">
-              {headline(history[cursor - 1] ?? "", current.classification!)}
-            </span>
-            <span className="font-mono text-xs ml-auto">
-              {evalText(current.eval_cp)}
-            </span>
-          </div>
-
-          <p className="text-xs text-ink/80 mt-2">{current.review}</p>
-          {bestSan &&
-            current.classification !== "best" &&
-            current.classification !== "book" && (
-              <p className="text-accent text-xs mt-1">Best was {bestSan}</p>
-            )}
-
-          <div className="flex items-center gap-2 mt-2">
-            <button
-              className="btn text-xs"
-              onClick={() => onSeek(Math.max(0, cursor - 1))}
-              disabled={cursor <= 1}
-            >
-              ◀ Prev
-            </button>
-            <button
-              className="btn-primary text-xs flex-1"
-              onClick={() => onSeek(Math.min(N, cursor + 1))}
-              disabled={cursor >= N}
-            >
-              Next ▶
-            </button>
-          </div>
-        </div>
-      )}
-
+      {/* ---------- Verdict counts ---------- */}
       {hasReview && (
         <table className="w-full text-xs">
-          <thead className="text-muted">
-            <tr>
-              <th className="text-left font-normal">Move quality</th>
-              <th className="text-right font-normal w-14">White</th>
-              <th className="text-right font-normal w-14">Black</th>
+          <thead>
+            <tr className="text-muted">
+              <th className="pb-1 text-left font-normal">Move quality</th>
+              <th className="w-12 pb-1 text-right font-normal">White</th>
+              <th className="w-12 pb-1 text-right font-normal">Black</th>
             </tr>
           </thead>
           <tbody>
-            {countRows.map((cls) => {
+            {CLASS_ORDER.map((cls) => {
               const w = counts.white[cls] ?? 0;
               const b = counts.black[cls] ?? 0;
               if (w === 0 && b === 0) return null;
               const meta = CLASS_META[cls];
               return (
-                <tr key={cls}>
-                  <td className={`py-0.5 ${meta.color || "text-ink"}`}>
-                    {meta.glyph && `${meta.glyph} `}
-                    {meta.label}
+                <tr key={cls} className="hover:bg-white/[0.04]">
+                  <td className="py-0.5">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="grid h-4 w-4 place-items-center rounded-full text-[8px] font-bold text-white"
+                        style={{ background: meta.bg }}
+                      >
+                        {meta.glyph}
+                      </span>
+                      <span className={meta.color}>{meta.label}</span>
+                    </span>
                   </td>
                   <td className="text-right font-mono">{w}</td>
                   <td className="text-right font-mono">{b}</td>
@@ -324,6 +339,6 @@ export default function ReviewPanel({
           </tbody>
         </table>
       )}
-    </section>
+    </div>
   );
 }

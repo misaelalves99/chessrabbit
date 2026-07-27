@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { useBoardTheme } from "@/lib/boardTheme";
 import { api, ApiError, IntuitionPosition, getAccessToken } from "@/lib/api";
 import { useClickToMove } from "@/hooks/useClickToMove";
 
@@ -29,6 +30,7 @@ interface RoundResult {
 }
 
 export default function IntuitionPage() {
+  const skin = useBoardTheme();
   const router = useRouter();
   const game = useRef(new Chess());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -268,9 +270,9 @@ export default function IntuitionPage() {
               onSquareClick={onSquareClick}
               boardOrientation={orientation}
               arePiecesDraggable={phase === "answer" && !judging}
-              customBoardStyle={{ borderRadius: "4px" }}
-              customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
-              customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
+              {...skin.props}
+
+              animationDuration={skin.animationMs}
               customSquareStyles={squareStyles}
             />
           </div>

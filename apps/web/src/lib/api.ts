@@ -123,6 +123,97 @@ export interface ExplorerMove {
   black_pct: number;
 }
 
+// ---- Insights ----
+
+export type TimeClass =
+  | "bullet" | "blitz" | "rapid" | "classical" | "correspondence";
+export type InsightsRange = "all" | "30d" | "90d" | "1y";
+
+export interface InsightsQuery {
+  timeClass?: TimeClass;
+  color?: "w" | "b";
+  range?: InsightsRange;
+}
+
+/** Games plus their outcomes — the unit nearly every chart is built from. */
+export interface Tally {
+  games: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  accuracy: number | null;
+}
+
+export interface OpeningRow {
+  name: string;
+  eco: string | null;
+  games: number;
+  wins: number;
+  draws: number;
+  losses: number;
+}
+
+export interface Insights {
+  filters: {
+    time_class: string | null;
+    color: string | null;
+    since: string | null;
+    tz_offset: number;
+  };
+  games: number;
+  reviewed: number;
+  /** Games we could not attribute to a colour, so are excluded throughout. */
+  unattributed: number;
+  replay_limit: number;
+  overview: {
+    played: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    by_month: { label: string; games: number }[];
+    accuracy: {
+      overall?: number | null;
+      win?: number | null;
+      draw?: number | null;
+      loss?: number | null;
+    };
+    accuracy_by_move: { move: number; accuracy: number | null; moves: number }[];
+    by_opponent_rating: {
+      bucket: number; games: number; wins: number; draws: number; losses: number;
+    }[];
+  };
+  results: {
+    won_by: { reason: string; games: number }[];
+    drew_by: { reason: string; games: number }[];
+    lost_by: { reason: string; games: number }[];
+  };
+  phases: {
+    ended_in?: Record<string, number>;
+    accuracy?: Record<string, number | null>;
+    results?: Record<string, Tally>;
+  };
+  shapes: Record<string, Tally>;
+  openings: { white: OpeningRow[]; black: OpeningRow[] };
+  moves: {
+    quality: { cls: string; moves: number; pct: number }[];
+    quality_by_month: Record<string, Record<string, number>>;
+    pieces: { piece: string; moves: number; accuracy: number | null }[];
+    castling: {
+      phase?: Record<string, number>;
+      side?: Record<string, number>;
+      results?: Record<string, Tally>;
+    };
+  };
+  calendar: {
+    time_of_day: {
+      slot: string; games: number; wins: number; draws: number; losses: number;
+    }[];
+    day_of_week: {
+      day: string; games: number; wins: number; draws: number; losses: number;
+    }[];
+  };
+}
+
 export interface Repertoire {
   id: number;
   name: string;
@@ -363,10 +454,14 @@ export const api = {
       `/analysis/jobs/${jobId}`
     ),
 
-  explorer: (fen: string, scope: ExplorerScope = "reference") =>
+  explorer: (
+    fen: string,
+    scope: ExplorerScope = "reference",
+    signal?: AbortSignal
+  ) =>
     request<{ fen: string; total_games: number; moves: ExplorerMove[] }>(
       "/explorer",
-      { method: "POST", body: JSON.stringify({ fen, scope }) }
+      { method: "POST", body: JSON.stringify({ fen, scope }), signal }
     ),
 
   searchPosition: (fen: string) =>
@@ -497,6 +592,19 @@ export const api = {
 
   billingPortal: () =>
     request<{ url: string }>("/billing/portal", { method: "POST" }),
+
+  // ---- insights ----
+
+  insights: (opts: InsightsQuery = {}) => {
+    const q = new URLSearchParams();
+    if (opts.timeClass) q.set("time_class", opts.timeClass);
+    if (opts.color) q.set("color", opts.color);
+    if (opts.range && opts.range !== "all") q.set("range", opts.range);
+    // The server stores UTC; the time-of-day chart is only meaningful in the
+    // reader's own clock, so tell it where we are.
+    q.set("tz_offset", String(-new Date().getTimezoneOffset()));
+    return request<Insights>(`/insights?${q.toString()}`);
+  },
 };
 
 export { ApiError, API_URL };

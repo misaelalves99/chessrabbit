@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { useBoardTheme } from "@/lib/boardTheme";
 import { api, ApiError, Puzzle, getAccessToken } from "@/lib/api";
 import { useClickToMove } from "@/hooks/useClickToMove";
 
@@ -43,6 +44,7 @@ function shuffled<T>(xs: T[]): T[] {
 }
 
 export default function ClockDrillPage() {
+  const skin = useBoardTheme();
   const router = useRouter();
   const game = useRef(new Chess());
   const puzzleRef = useRef<Puzzle | null>(null);
@@ -333,9 +335,9 @@ export default function ClockDrillPage() {
               onSquareClick={onSquareClick}
               boardOrientation={orientation}
               arePiecesDraggable={phase === "solving"}
-              customBoardStyle={{ borderRadius: "4px" }}
-              customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
-              customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
+              {...skin.props}
+
+              animationDuration={skin.animationMs}
               customSquareStyles={squareStyles}
             />
           </div>

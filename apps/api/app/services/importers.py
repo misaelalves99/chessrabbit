@@ -171,13 +171,42 @@ async def _fetch_chesscom(
     return entries
 
 
+def color_played(parsed: dict, identities: set[str]) -> str | None:
+    """
+    Which side the owner played, or None when we genuinely cannot tell.
+
+    `identities` is the set of lowercased names the user goes by (their linked
+    platform usernames, plus their display name for hand-pasted PGNs). Guessing
+    would be worse than abstaining: a wrong colour silently inverts every
+    win-rate on the Insights page.
+    """
+    if parsed.get("white", "").lower() in identities:
+        return "w"
+    if parsed.get("black", "").lower() in identities:
+        return "b"
+    return None
+
+
+async def user_identities(db: AsyncSession, user: User) -> set[str]:
+    """Every name this user plays under, lowercased."""
+    result = await db.execute(
+        select(ExternalAccount.username).where(ExternalAccount.user_id == user.id)
+    )
+    names = {row[0].lower() for row in result.all() if row[0]}
+    if user.display_name:
+        names.add(user.display_name.lower())
+    return names
+
+
 async def _import_entries(
     db: AsyncSession,
     user: User,
     entries: list[tuple[dict, str | None]],
     source: str,
+    identities: set[str] | None = None,
 ) -> tuple[int, int, int, list[str]]:
     """Insert games + position index rows. Returns (imported, duplicates, capped, errors)."""
+    known = identities if identities is not None else await user_identities(db, user)
     result = await db.execute(
         select(Game.external_id).where(
             Game.owner_id == user.id, Game.external_id.is_not(None)
@@ -207,7 +236,13 @@ async def _import_entries(
             capped += 1
             continue
         try:
-            game = Game(owner_id=user.id, source=source, external_id=ext_id, **parsed)
+            game = Game(
+                owner_id=user.id,
+                source=source,
+                external_id=ext_id,
+                user_color=color_played(parsed, known),
+                **parsed,
+            )
             db.add(game)
             await db.flush()
             for ply, zob, uci in positions_of_game(game.movetext):
@@ -236,8 +271,11 @@ async def sync_account(db: AsyncSession, user: User, account: ExternalAccount) -
         await db.commit()
         raise
 
+    # The platform reports this account's canonical username, so colour
+    # detection for a sync is exact rather than a best-effort name match.
     imported, duplicates, capped, errors = await _import_entries(
-        db, user, entries, source=account.platform
+        db, user, entries, source=account.platform,
+        identities={account.username.lower()},
     )
 
     account.last_synced_at = datetime.now(timezone.utc)

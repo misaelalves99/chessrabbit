@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Chessboard } from "react-chessboard";
+import { useBoardTheme } from "@/lib/boardTheme";
 import { useClickToMove } from "@/hooks/useClickToMove";
 import {
   api, ApiError, Opening, Repertoire, TrainingCard, TrainingResult,
@@ -14,6 +15,7 @@ const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 type Feedback = (TrainingResult & { answered: string }) | null;
 
 export default function TrainPage() {
+  const skin = useBoardTheme();
   const router = useRouter();
   const [reps, setReps] = useState<Repertoire[]>([]);
   const [queue, setQueue] = useState<TrainingCard[]>([]);
@@ -147,8 +149,9 @@ export default function TrainPage() {
                   onSquareClick={onSquareClick}
                   boardOrientation={card.color}
                   arePiecesDraggable={!feedback}
-                  customDarkSquareStyle={{ backgroundColor: "#8CA2AD" }}
-                  customLightSquareStyle={{ backgroundColor: "#DCE1E7" }}
+                  {...skin.props}
+
+                  animationDuration={skin.animationMs}
                   customSquareStyles={squareStyles}
                 />
               </div>
