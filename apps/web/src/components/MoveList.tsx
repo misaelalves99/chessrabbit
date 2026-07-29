@@ -3,13 +3,19 @@
 import { useEffect, useRef } from "react";
 import { Annotation } from "@/lib/api";
 import { CLASS_META } from "@/lib/classification";
+import { MoveTree, NodeId, nodeAt } from "@/lib/moveTree";
+import { Row, Token } from "@/lib/moveTreeRender";
 
 interface Props {
-  history: string[];
+  tree: MoveTree;
+  rows: Row[];
   annByPly: Map<number, Annotation>;
-  cursor: number;
-  onSeek: (ply: number) => void;
+  cursorId: NodeId;
+  onSeek: (id: NodeId) => void;
 }
+
+/** How far a side line is allowed to walk right before it stops indenting. */
+const MAX_INDENT = 3;
 
 /** Nearest ancestor that actually scrolls, or null if the page is the scroller. */
 function scrollingParent(el: HTMLElement | null): HTMLElement | null {
@@ -21,11 +27,16 @@ function scrollingParent(el: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * Paired move list: one row per full move, White then Black, each with its
- * review verdict. The row for the current ply is kept in view so stepping
- * through a long game never leaves you hunting for your place.
+ * The game in numbered pairs, with every line you tried instead of it indented
+ * beneath the move it answers. The row for the current move is kept in view so
+ * stepping through a long game never leaves you hunting for your place.
+ *
+ * Only main-line moves carry a review badge. A variation has no server verdict,
+ * and borrowing the one belonging to the move it replaced would label it with
+ * an opinion of a different move - the failure this whole panel is built to
+ * avoid.
  */
-export default function MoveList({ history, annByPly, cursor, onSeek }: Props) {
+export default function MoveList({ tree, rows, annByPly, cursorId, onSeek }: Props) {
   const activeRef = useRef<HTMLButtonElement>(null);
 
   // Centre the current move inside the panel. Deliberately not
@@ -41,9 +52,9 @@ export default function MoveList({ history, annByPly, cursor, onSeek }: Props) {
       top: e.top + e.height / 2 - (b.top + b.height / 2),
       behavior: "smooth",
     });
-  }, [cursor]);
+  }, [cursorId]);
 
-  if (history.length === 0) {
+  if (rows.length === 0) {
     return (
       <p className="text-xs text-muted px-1 py-3">
         Drag a piece — or click it — to start a line. Arrow keys walk the moves.
@@ -51,20 +62,17 @@ export default function MoveList({ history, annByPly, cursor, onSeek }: Props) {
     );
   }
 
-  const rows = Math.ceil(history.length / 2);
-
-  const cell = (ply: number) => {
-    const san = history[ply];
-    if (!san) return <span />;
-    const meta = annByPly.get(ply)?.classification
-      ? CLASS_META[annByPly.get(ply)!.classification!]
-      : null;
-    const active = cursor === ply + 1;
+  const cell = (id?: NodeId) => {
+    const n = id == null ? undefined : nodeAt(tree, id);
+    if (!n) return <span />;
+    const cls = annByPly.get(n.ply)?.classification;
+    const meta = cls ? CLASS_META[cls] : null;
+    const active = cursorId === n.id;
     return (
       <button
         ref={active ? activeRef : undefined}
-        onClick={() => onSeek(ply + 1)}
-        title={annByPly.get(ply)?.review ?? undefined}
+        onClick={() => onSeek(n.id)}
+        title={annByPly.get(n.ply)?.review ?? undefined}
         aria-current={active ? "true" : undefined}
         className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left font-mono text-[13px]
                     transition-colors ${
@@ -81,22 +89,61 @@ export default function MoveList({ history, annByPly, cursor, onSeek }: Props) {
             {meta.glyph}
           </span>
         )}
-        <span className={meta && !active ? meta.color : undefined}>{san}</span>
+        <span className={meta && !active ? meta.color : undefined}>{n.san}</span>
+      </button>
+    );
+  };
+
+  const token = (t: Token, i: number) => {
+    if (t.t === "paren") {
+      return (
+        <span key={i} className="px-0.5 text-muted/70">
+          {t.text}
+        </span>
+      );
+    }
+    const active = cursorId === t.id;
+    return (
+      <button
+        key={i}
+        ref={active ? activeRef : undefined}
+        onClick={() => onSeek(t.id)}
+        aria-current={active ? "true" : undefined}
+        className={`rounded px-1 py-0.5 transition-colors ${
+          active ? "bg-accent/25 font-semibold text-ink ring-1 ring-accent/50" : "hover:bg-white/[0.07]"
+        }`}
+      >
+        {t.num && <span className="mr-0.5 text-muted">{t.num}</span>}
+        {t.san}
       </button>
     );
   };
 
   return (
     <div className="grid grid-cols-[1.75rem_1fr_1fr] items-center gap-x-1 gap-y-0.5">
-      {Array.from({ length: rows }).map((_, i) => (
-        <div key={i} className="contents">
-          <span className="text-right pr-1 font-mono text-[11px] text-muted">
-            {i + 1}.
-          </span>
-          {cell(i * 2)}
-          {cell(i * 2 + 1)}
-        </div>
-      ))}
+      {rows.map((row) =>
+        row.kind === "pair" ? (
+          <div key={row.key} className="contents">
+            <span className="text-right pr-1 font-mono text-[11px] text-muted">
+              {row.moveNo}.
+            </span>
+            {cell(row.white)}
+            {cell(row.black)}
+          </div>
+        ) : (
+          <div
+            key={row.key}
+            // The rail is what tells you at a glance that these moves were
+            // never played. Indenting stops after a few levels so a deep line
+            // stays readable in a panel this narrow.
+            className="col-span-3 my-0.5 flex flex-wrap items-center border-l-2 border-accent/25
+                       py-0.5 pl-1.5 font-mono text-[12px] text-ink/70"
+            style={{ marginLeft: `${Math.min(row.depth, MAX_INDENT) * 10}px` }}
+          >
+            {row.tokens.map(token)}
+          </div>
+        )
+      )}
     </div>
   );
 }

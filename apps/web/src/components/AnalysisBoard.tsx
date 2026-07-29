@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Chess, Square } from "chess.js";
+import { Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEngine, formatEval } from "@/hooks/useEngine";
 import { useClickToMove } from "@/hooks/useClickToMove";
+import { useMoveTree } from "@/hooks/useMoveTree";
 import { useSquareSize } from "@/hooks/useSquareSize";
 import Link from "next/link";
 import { Annotation, api, ApiError, ExplorerMove, ExplorerScope, ReviewSummary } from "@/lib/api";
@@ -19,6 +20,33 @@ import ExplorerPane from "@/components/ExplorerPane";
 
 /** Eval bar width + the gap between it and the board. */
 const BOARD_GUTTER = 28;
+
+/**
+ * The Clipboard API wants a secure context and a live user gesture, and
+ * refuses outright in an iframe without permission - so the deprecated path
+ * stays as a fallback, and the caller is told when both refuse rather than
+ * being left to wonder why the button did nothing.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    /* fall through to the old way */
+  }
+  try {
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+    document.body.appendChild(box);
+    box.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(box);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Holding an arrow key walks the game faster than any of this can answer.
@@ -56,9 +84,19 @@ export default function AnalysisBoard({
   initialAnnotations,
   expectedPlies,
 }: Props) {
-  // `game` is the authoritative position; history drives the move list.
-  const [history, setHistory] = useState<string[]>([]);
-  const [cursor, setCursor] = useState(0); // ply index; 0 = start position
+  // The tree is the authoritative position: the game, plus every line tried
+  // instead of it. Its main line is the game, which is what lets the review
+  // below go on keying itself by ply.
+  //
+  // Lines are kept per game, so reopening one from the rail brings back what
+  // you found in it. A pasted PGN with no game behind it has no stable name to
+  // file them under, so it gets none; the empty board is its own scratch pad.
+  const storageKey = gameId != null ? `game:${gameId}` : initialPgn ? undefined : "scratch";
+  const mt = useMoveTree(initialPgn, storageKey);
+  const { history, fen, cursorId, onMainline } = mt;
+
+  const [copied, setCopied] = useState<"done" | "failed" | null>(null);
+
   const [orientation, setOrientation] = useState<"white" | "black">("white");
   const [explorer, setExplorer] = useState<ExplorerMove[]>([]);
   const [explorerTotal, setExplorerTotal] = useState(0);
@@ -125,26 +163,6 @@ export default function AnalysisBoard({
   }, [gameId, reviewing]);
 
 
-  // One replay of the game per move list, not one per cursor step. It yields
-  // both the from/to squares (board highlighting + badges) and the position
-  // after every ply, so moving the cursor is a lookup rather than a rebuild.
-  const { moveSquares, fens } = useMemo(() => {
-    const g = new Chess();
-    const squares: { from: Square; to: Square }[] = [];
-    const positions: string[] = [g.fen()]; // index 0 = start position
-    for (const san of history) {
-      try {
-        const m = g.move(san);
-        if (!m) break;
-        squares.push({ from: m.from, to: m.to });
-        positions.push(g.fen());
-      } catch {
-        break;
-      }
-    }
-    return { moveSquares: squares, fens: positions };
-  }, [history]);
-
   /**
    * Keep only the annotations that provably describe the move we hold.
    *
@@ -158,23 +176,27 @@ export default function AnalysisBoard({
    * rather than assumed. Rows predating migration 011 have no move recorded;
    * for those we fall back to comparing the whole-game ply count, which catches
    * a diverged parse without being able to pinpoint it.
+   *
+   * The check runs against the tree's main line, never against a variation:
+   * the main line is the game the server reviewed, and a line you invented
+   * has no review to be aligned with in the first place.
    */
   const { annByPly, mismatched } = useMemo(() => {
     const m = new Map<number, Annotation>();
     let bad = 0;
 
-    // Only meaningful once the PGN has been read into `history`.
+    // Only meaningful once the PGN has been read into the main line.
     const countAgrees =
       expectedPlies == null || history.length === 0 || history.length === expectedPlies;
 
     for (const a of annotations) {
       if (!a.classification) continue;
-      const played = moveSquares[a.ply];
+      const played = mt.mainUci[a.ply];
 
       if (a.move_uci) {
         // No move at this ply means the row describes a game we do not have.
         // from+to is enough: a promotion suffix cannot change which move it is.
-        if (!played || a.move_uci.slice(0, 4) !== `${played.from}${played.to}`) {
+        if (!played || a.move_uci.slice(0, 4) !== played.slice(0, 4)) {
           bad++;
           continue;
         }
@@ -185,13 +207,17 @@ export default function AnalysisBoard({
       m.set(a.ply, a);
     }
     return { annByPly: m, mismatched: bad };
-  }, [annotations, moveSquares, expectedPlies, history.length]);
+  }, [annotations, mt.mainUci, expectedPlies, history.length]);
 
   const hasReview = annByPly.size > 0;
 
-  // The move the cursor just played (ply cursor-1) and its review verdict
-  const reviewedMove = cursor > 0 ? moveSquares[cursor - 1] : undefined;
-  const currentAnn = cursor > 0 ? annByPly.get(cursor - 1) : undefined;
+  /** Moves that exist only because you went looking - the root is not one. */
+  const exploredMoves = mt.tree.nodes.size - 1 - history.length;
+
+  // The move that led here is highlighted wherever it was played; only a move
+  // of the game itself carries a verdict.
+  const reviewedMove = mt.lastMove;
+  const currentAnn = onMainline && mt.cursorPly > 0 ? annByPly.get(mt.node.ply) : undefined;
   const reviewedClass = currentAnn?.classification;
 
   const highlightStyles = useMemo(() => {
@@ -221,22 +247,6 @@ export default function AnalysisBoard({
     },
     [orientation]
   );
-
-  // Load an initial PGN once on mount
-  useEffect(() => {
-    if (!initialPgn) return;
-    const g = new Chess();
-    try {
-      g.loadPgn(initialPgn);
-      setHistory(g.history());
-      setCursor(0);
-    } catch {
-      /* malformed pgn - keep empty board */
-    }
-  }, [initialPgn]);
-
-  // The position at the cursor, straight off the replay above.
-  const fen = fens[Math.min(cursor, fens.length - 1)];
 
   // Ask the engine + explorer once the position stops changing. A cached
   // explorer answer is applied immediately, so revisiting a position you have
@@ -287,56 +297,42 @@ export default function AnalysisBoard({
 
   useEffect(() => () => explorerAbort.current?.abort(), []);
 
-  // Playing a move from the current cursor truncates any future moves
-  const onDrop = useCallback(
-    (from: string, to: string) => {
-      // Starting from the cursor's FEN is enough to validate and name the
-      // move, and avoids replaying the game to get there.
-      const g = new Chess(fen);
-      let move;
-      try {
-        move = g.move({ from, to, promotion: "q" });
-      } catch {
-        return false;
-      }
-      if (!move) return false;
-
-      const next = [...history.slice(0, cursor), move.san];
-      setHistory(next);
-      setCursor(next.length);
-      return true;
-    },
-    [cursor, history, fen]
-  );
+  // Playing a move branches off the position you are standing on. Nothing is
+  // ever thrown away to make room for it.
+  const onDrop = mt.play;
 
   const { onSquareClick, squareStyles } = useClickToMove(fen, onDrop);
 
-  const goStart = useCallback(() => setCursor(0), []);
-  const goBack = useCallback(() => setCursor((c) => Math.max(0, c - 1)), []);
-  const goNext = useCallback(
-    () => setCursor((c) => Math.min(history.length, c + 1)),
-    [history.length]
-  );
-  const goEnd = useCallback(() => setCursor(history.length), [history.length]);
   const flip = useCallback(
     () => setOrientation((o) => (o === "white" ? "black" : "white")),
     []
   );
 
-  // Keyboard navigation, like every serious chess GUI
+  // PGN writes variations natively, so the lines you found leave here in a
+  // form ChessBase, Lichess and SCID all already understand.
+  const copyPgn = useCallback(async () => {
+    setCopied((await copyText(mt.exportPgn())) ? "done" : "failed");
+    setTimeout(() => setCopied(null), 1800);
+  }, [mt]);
+
+  // Keyboard navigation, like every serious chess GUI. Alt+Up/Down cycling the
+  // alternatives at a point is the one that makes a tree walkable; Escape is
+  // the way out once you are four moves deep in a line that never happened.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
-      if (e.key === "ArrowLeft") goBack();
-      if (e.key === "ArrowRight") goNext();
-      if (e.key === "ArrowUp") goStart();
-      if (e.key === "ArrowDown") goEnd();
+      if (e.key === "ArrowLeft") mt.back();
+      if (e.key === "ArrowRight") mt.next();
+      if (e.key === "ArrowUp") (e.altKey ? mt.nextAlternative(-1) : mt.toStart());
+      if (e.key === "ArrowDown") (e.altKey ? mt.nextAlternative(1) : mt.toEnd());
+      if (e.key === "Escape") mt.backToGame();
+      if (e.key === "Delete" || e.key === "Backspace") mt.removeLine();
       if (e.key === "f") flip();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [goBack, goNext, goStart, goEnd, flip]);
+  }, [mt, flip]);
 
   const best = engine.lines[0];
   const evalText = formatEval(best);
@@ -434,7 +430,7 @@ export default function AnalysisBoard({
           <div className="flex items-center gap-2">
             <span className="eyebrow">Game review</span>
             <span className="ml-auto font-mono text-[11px] text-muted">
-              {cursor}/{history.length}
+              {onMainline ? mt.cursorPly : "–"}/{history.length}
             </span>
           </div>
           <p className="mt-0.5 truncate text-sm font-medium" title={gameLabel}>
@@ -483,35 +479,81 @@ export default function AnalysisBoard({
             </div>
           )}
 
+          {/* Off the game, there is no review to show and the coach says
+              nothing - so say where you are instead, and offer the way back. */}
+          {!onMainline && (
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs">
+              <span>You&rsquo;re in a line that wasn&rsquo;t played.</span>
+              <button
+                onClick={mt.backToGame}
+                className="ml-auto shrink-0 text-accent underline"
+              >
+                Back to the game
+              </button>
+            </div>
+          )}
+
           {tab === "review" && (
             <ReviewPanel
               history={history}
               annotations={[...annByPly.values()]}
               summary={reviewSummary}
-              cursor={cursor}
-              onSeek={setCursor}
+              cursor={mt.cursorPly}
+              onSeek={mt.seekPly}
               reviewing={reviewing}
               onRun={runReview}
               canRun={gameId != null}
+              onShowBest={(san) => {
+                mt.playInstead([san]);
+                setTab("moves");
+              }}
             />
           )}
           {tab === "moves" && (
-            <MoveList
-              history={history}
-              annByPly={annByPly}
-              cursor={cursor}
-              onSeek={setCursor}
-            />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-[11px] text-muted">
+                <span className="truncate">
+                  {exploredMoves > 0
+                    ? `${exploredMoves} move${exploredMoves === 1 ? "" : "s"} in lines you tried`
+                    : "Play a move anywhere to start a line"}
+                </span>
+                <button
+                  onClick={copyPgn}
+                  disabled={history.length === 0}
+                  className={`ml-auto shrink-0 rounded border px-2 py-0.5 transition-colors
+                             disabled:opacity-40 disabled:hover:bg-transparent ${
+                               copied === "failed"
+                                 ? "border-bad/40 text-bad"
+                                 : "border-white/10 hover:bg-white/10 hover:text-ink"
+                             }`}
+                >
+                  {copied === "done"
+                    ? "Copied"
+                    : copied === "failed"
+                      ? "Copy blocked"
+                      : "Copy PGN"}
+                </button>
+              </div>
+              <MoveList
+                tree={mt.tree}
+                rows={mt.rows}
+                annByPly={annByPly}
+                cursorId={cursorId}
+                onSeek={mt.seek}
+              />
+            </div>
           )}
           {tab === "engine" && (
             <EnginePane
               lines={engine.lines}
+              fen={fen}
               depth={engine.depth}
               connected={engine.connected}
               thinking={engine.thinking}
               error={engine.error}
               autoAnalyse={autoAnalyse}
               onToggleAuto={(autoAnalyse) => updateSettings({ autoAnalyse })}
+              onPlayLine={(sans, evalCp) => mt.playLine(sans, { evalCp })}
             />
           )}
           {tab === "book" && (
@@ -529,18 +571,48 @@ export default function AnalysisBoard({
         {/* Transport controls: pinned to the panel on a desktop, and stuck to
             the bottom of the viewport while scrolling on a phone. */}
         <div className="sticky bottom-0 shrink-0 border-t border-white/[0.06] bg-panel/90 p-2.5 backdrop-blur-xl lg:static lg:bg-transparent lg:backdrop-blur-none">
-          {hasReview && cursor < history.length && (
-            <button className="btn-go mb-2 w-full text-sm" onClick={goNext}>
+          {hasReview && onMainline && mt.node.children.length > 0 && (
+            <button className="btn-go mb-2 w-full text-sm" onClick={mt.next}>
               Next move  →
             </button>
+          )}
+          {mt.alternatives.length > 1 && (
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] text-muted">
+              <span className="shrink-0">
+                {mt.alternatives.indexOf(cursorId) + 1} of {mt.alternatives.length} tried here
+              </span>
+              <button
+                onClick={() => mt.nextAlternative(-1)}
+                title="Previous alternative (Alt+↑)"
+                className="ml-auto rounded border border-white/10 px-1.5 py-0.5 hover:bg-white/10 hover:text-ink"
+              >
+                ↑
+              </button>
+              <button
+                onClick={() => mt.nextAlternative(1)}
+                title="Next alternative (Alt+↓)"
+                className="rounded border border-white/10 px-1.5 py-0.5 hover:bg-white/10 hover:text-ink"
+              >
+                ↓
+              </button>
+              {!onMainline && (
+                <button
+                  onClick={mt.removeLine}
+                  title="Delete this line (Del)"
+                  className="rounded border border-white/10 px-1.5 py-0.5 hover:bg-bad/20 hover:text-bad"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           )}
           <div className="flex items-center gap-2">
             <div className="flex flex-1 divide-x divide-white/10 overflow-hidden rounded-lg border border-white/10 bg-white/[0.05]">
               {[
-                { glyph: "«", title: "Start (↑)", go: goStart },
-                { glyph: "‹", title: "Back (←)", go: goBack },
-                { glyph: "›", title: "Forward (→)", go: goNext },
-                { glyph: "»", title: "End (↓)", go: goEnd },
+                { glyph: "«", title: "Start (↑)", go: mt.toStart },
+                { glyph: "‹", title: "Back (←)", go: mt.back },
+                { glyph: "›", title: "Forward (→)", go: mt.next },
+                { glyph: "»", title: "End (↓)", go: mt.toEnd },
               ].map((b) => (
                 <button
                   key={b.glyph}

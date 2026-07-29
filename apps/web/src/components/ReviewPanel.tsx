@@ -39,6 +39,8 @@ interface Props {
   reviewing: boolean;
   onRun: () => void;
   canRun: boolean;
+  /** Put the engine's preference on the board, beside the move that was played. */
+  onShowBest?: (san: string) => void;
 }
 
 export default function ReviewPanel({
@@ -50,6 +52,7 @@ export default function ReviewPanel({
   reviewing,
   onRun,
   canRun,
+  onShowBest,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const byPly = useMemo(() => {
@@ -177,13 +180,27 @@ export default function ReviewPanel({
             {current.review && (
               <p className="mt-2 text-xs leading-relaxed text-ink/75">{current.review}</p>
             )}
+            {/* Telling you what you should have played and giving you no way
+                to see it was only ever a limitation of a move list that had to
+                delete the game to show you. It doesn't any more. */}
             {bestSan &&
               current.classification !== "best" &&
-              current.classification !== "book" && (
+              current.classification !== "book" &&
+              (onShowBest ? (
+                <button
+                  onClick={() => onShowBest(bestSan)}
+                  className="mt-1.5 flex items-center gap-1.5 rounded-md border border-accent/30
+                             bg-accent/10 px-2 py-1 text-xs text-accent transition-colors
+                             hover:bg-accent/20"
+                >
+                  Best was <span className="font-mono font-semibold">{bestSan}</span>
+                  <span className="text-accent/70">— show me</span>
+                </button>
+              ) : (
                 <p className="mt-1.5 text-xs text-accent">
                   Best was <span className="font-mono font-semibold">{bestSan}</span>
                 </p>
-              )}
+              ))}
           </div>
         ) : (
           <div className="flex-1 rounded-2xl rounded-tl-sm bg-panelAlt/70 p-3 ring-1 ring-white/[0.06]">
