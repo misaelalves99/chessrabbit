@@ -26,7 +26,7 @@ export default function ForgotPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-bold">Reset password</h1>
+        <h1 className="font-display text-3xl leading-none">Reset password</h1>
 
         {sent ? (
           <p className="text-sm text-muted">
@@ -53,7 +53,7 @@ export default function ForgotPage() {
         )}
 
         <p className="text-sm text-muted">
-          <Link href="/login" className="text-accent hover:underline">
+          <Link href="/login" className="text-brassLit hover:underline">
             Back to sign in
           </Link>
         </p>

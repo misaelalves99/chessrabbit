@@ -35,6 +35,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.breaker import CircuitOpen, breaker
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
@@ -62,13 +63,57 @@ def _require_stripe_config() -> None:
         )
 
 
-async def _stripe_post(path: str, data: dict) -> dict:
+# Checkout and portal are the only outbound Stripe calls, and both sit in front
+# of a user waiting on a button. There is no useful fallback for "start a
+# payment", so the breaker's job here is purely to stop a wedged Stripe from
+# holding 20 seconds of worker per click during an incident.
+_stripe_breaker = breaker(
+    "stripe",
+    failure_threshold=5,
+    reset_after=30.0,
+    slow_call_seconds=10.0,
+    max_concurrency=8,
+)
+
+
+async def _stripe_request(path: str, data: dict) -> httpx.Response:
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(
             f"{STRIPE_API}{path}",
             auth=(settings.STRIPE_SECRET_KEY, ""),
             data=data,
         )
+    # 5xx means Stripe is unwell and the breaker should hear about it; 4xx
+    # means we sent something wrong, which retrying elsewhere will not fix and
+    # which must not trip the circuit for everyone else.
+    if resp.status_code >= 500:
+        log.error("Stripe %s failed (%s): %s", path, resp.status_code, resp.text[:300])
+        raise httpx.HTTPStatusError(
+            f"stripe {resp.status_code}", request=resp.request, response=resp
+        )
+    return resp
+
+
+async def _stripe_post(path: str, data: dict) -> dict:
+    try:
+        resp = await _stripe_breaker.call(_stripe_request, path, data)
+    except CircuitOpen as exc:
+        log.warning("Stripe circuit open, refusing %s: %s", path, exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "stripe_unavailable",
+                "message": "The payment provider is not responding. "
+                           "Please try again in a minute.",
+            },
+        ) from exc
+    except httpx.HTTPError as exc:
+        log.error("Stripe %s errored: %s", path, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "stripe_error", "message": "Payment provider request failed"},
+        ) from exc
+
     if resp.status_code >= 400:
         log.error("Stripe %s failed (%s): %s", path, resp.status_code, resp.text[:300])
         raise HTTPException(
@@ -235,6 +280,39 @@ async def _user_by_customer(db: AsyncSession, customer: str) -> int | None:
     return row.scalar_one_or_none()
 
 
+async def _record_event(
+    db: AsyncSession, user_id: int, event_type: str, plan: str,
+    sub_status: str | None = None, stripe_event_id: str | None = None,
+) -> None:
+    """
+    Append to the billing ledger (migration 013).
+
+    `subscriptions` is overwritten in place by each webhook, so a cancellation
+    used to erase the fact that the subscription had ever existed - churn and
+    new-subscriptions-per-day were not computable from it at any price. This
+    table is the history the admin dashboard reads.
+
+    The amount is snapshotted from the tier price at event time rather than
+    joined at read time, so repricing a tier does not rewrite past revenue.
+    """
+    from app.core.tiers import tier_for
+
+    await db.execute(
+        text(
+            """
+            INSERT INTO subscription_events
+              (user_id, event_type, plan, status, amount_cents, stripe_event_id)
+            VALUES (:uid, :type, :plan, :status, :amount, :event_id)
+            """
+        ),
+        {
+            "uid": user_id, "type": event_type, "plan": plan, "status": sub_status,
+            "amount": round(tier_for(plan).price_monthly * 100),
+            "event_id": stripe_event_id,
+        },
+    )
+
+
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,
@@ -280,9 +358,23 @@ async def stripe_webhook(
         user_id = int(obj.get("client_reference_id") or 0)
         customer = obj.get("customer") or ""
         subscription = obj.get("subscription")
-        if user_id and customer:
+        # "Completed" means the customer finished the flow, not that money
+        # moved. Delayed methods (bank debits, vouchers) complete the session
+        # with payment_status "unpaid" and settle days later - or never. Cards
+        # settle immediately and arrive here as "paid", so this changes nothing
+        # for the common path and closes the one where a subscription is
+        # granted for a payment that has not happened yet. The later
+        # customer.subscription.updated event grants the plan once it does.
+        payment_status = obj.get("payment_status", "paid")
+        if payment_status not in ("paid", "no_payment_required"):
+            log.info(
+                "Checkout %s completed but payment_status=%s; leaving plan unchanged",
+                obj.get("id"), payment_status,
+            )
+        elif user_id and customer:
             await _upsert_subscription(db, user_id, customer, subscription, "active", None)
             await _set_plan(db, user_id, "pro")
+            await _record_event(db, user_id, "subscribed", "pro", "active", event_id)
             log.info("User %s upgraded to pro (checkout %s)", user_id, obj.get("id"))
         else:
             log.warning("checkout.session.completed missing reference/customer: %s", event_id)
@@ -298,6 +390,14 @@ async def stripe_webhook(
             )
             plan = "pro" if sub_status in ACTIVE_STATUSES else "free"
             await _set_plan(db, user_id, plan)
+            # A still-active subscription that fired an update is a renewal;
+            # anything else is a state change worth distinguishing on the
+            # dashboard, since the second kind is what precedes churn.
+            await _record_event(
+                db, user_id,
+                "renewed" if sub_status in ACTIVE_STATUSES else "status_changed",
+                plan, sub_status, event_id,
+            )
             log.info("User %s subscription -> %s (plan=%s)", user_id, sub_status, plan)
         else:
             log.warning("subscription.updated for unknown customer %s", customer)
@@ -307,12 +407,22 @@ async def stripe_webhook(
         user_id = await _user_by_customer(db, customer)
         if user_id:
             await _upsert_subscription(db, user_id, customer, obj.get("id"), "canceled", None)
+            await db.execute(
+                text("UPDATE subscriptions SET canceled_at = now() WHERE user_id = :uid"),
+                {"uid": user_id},
+            )
             await _set_plan(db, user_id, "free")
+            # Priced at the plan they are leaving, not the free plan they land
+            # on - this row is what churned MRR is summed from.
+            await _record_event(db, user_id, "canceled", "pro", "canceled", event_id)
             log.info("User %s subscription canceled -> free", user_id)
 
     elif event_type == "invoice.payment_failed":
-        log.warning("Payment failed for customer %s (dunning handled by Stripe)",
-                    obj.get("customer"))
+        customer = obj.get("customer") or ""
+        user_id = await _user_by_customer(db, customer)
+        if user_id:
+            await _record_event(db, user_id, "payment_failed", "pro", "past_due", event_id)
+        log.warning("Payment failed for customer %s (dunning handled by Stripe)", customer)
 
     else:
         handled = False

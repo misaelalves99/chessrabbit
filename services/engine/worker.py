@@ -658,13 +658,34 @@ def _accuracy_scores(evals: list[float]) -> dict:
     return {"white": score(white_losses), "black": score(black_losses)}
 
 
+# Games run to a few hundred plies at most, so this only ever splits the
+# pathological ones - but an unbounded batch is an unbounded pipeline buffer.
+_ANNOTATION_CHUNK = 500
+
+
 async def _store_annotations(
     conn, game_id: int, user_id: int, annotations: list[dict]
 ) -> None:
     """Upsert review rows. `comment` is the user's own field - never touched."""
+    if not annotations:
+        return
+
+    params = [
+        (
+            game_id, user_id, ann["ply"], ann["nag"], ann["eval_cp"],
+            ann["best_uci"], ann["move_uci"], ann["move_san"],
+            ann["classification"], ann["review"],
+        )
+        for ann in annotations
+    ]
+
+    # executemany(), not a statement per ply: psycopg3 sends the whole batch in
+    # pipeline mode, so a 90-move review is one round trip instead of 90. The
+    # engine time dominates a full-game job, but this ran at the end while
+    # holding both an engine and a connection.
     async with conn.cursor() as cur:
-        for ann in annotations:
-            await cur.execute(
+        for start in range(0, len(params), _ANNOTATION_CHUNK):
+            await cur.executemany(
                 """
                 INSERT INTO annotations
                   (game_id, user_id, ply, nag, eval_cp, best_uci, move_uci,
@@ -678,11 +699,7 @@ async def _store_annotations(
                       classification = EXCLUDED.classification,
                       review = EXCLUDED.review
                 """,
-                (
-                    game_id, user_id, ann["ply"], ann["nag"], ann["eval_cp"],
-                    ann["best_uci"], ann["move_uci"], ann["move_san"],
-                    ann["classification"], ann["review"],
-                ),
+                params[start : start + _ANNOTATION_CHUNK],
             )
     await conn.commit()
 

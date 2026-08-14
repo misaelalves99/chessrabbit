@@ -6,7 +6,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
       POSTGRES_DB: chessrabbit
     ports:
-      - "5433:5432"   # host 5433: 5432 is taken by a native postgres install
+      # Bound to the loopback interface, NOT 0.0.0.0. "5433:5432" publishes on
+      # every interface and Docker writes its own iptables rules, so the port
+      # is reachable from the internet even with ufw denying it - on a host
+      # running this compose file that is an unauthenticated-from-the-outside
+      # database listening on a guessable port. The API and engine reach
+      # Postgres over the compose network, which does not need publishing at
+      # all; this mapping exists only so psql/pipeline scripts work from the
+      # host. (host 5433: 5432 is taken by a native postgres install)
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d:ro
@@ -20,7 +28,12 @@ services:
     image: redis:7-alpine
     command: redis-server --appendonly yes
     ports:
-      - "6380:6379"   # host 6380: 6379 is taken by another local project
+      # Loopback only, for the same reason as Postgres above - and more
+      # urgently: this Redis has no password. An exposed unauthenticated Redis
+      # is remote code execution on many configurations, and here it also holds
+      # every rate-limit counter and the engine job queue.
+      # (host 6380: 6379 is taken by another local project)
+      - "127.0.0.1:6380:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -56,6 +69,16 @@ services:
     environment:
       DATABASE_URL: postgresql://chessrabbit:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/chessrabbit
       REDIS_URL: redis://redis:6379/0
+      # The dev VM only has ~2.8GB total. At the production defaults (3 engines
+      # x 256MB hash) this worker alone took 1.3GB - half the VM - and pushed
+      # the Next.js dev server into swap, where a 500KB source tree took 84s to
+      # compile. One engine with a small hash is plenty to exercise the queue
+      # locally; override these in .env if you need real analysis depth.
+      # Named DEV_* on purpose: `${ENGINE_WORKERS}` would interpolate from the
+      # root .env (which carries the production 3/256) and defeat the default.
+      # Set DEV_ENGINE_WORKERS / DEV_ENGINE_HASH_MB in .env to override.
+      ENGINE_WORKERS: ${DEV_ENGINE_WORKERS:-1}
+      ENGINE_HASH_MB: ${DEV_ENGINE_HASH_MB:-64}
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,7 +108,10 @@ services:
       - ./apps/web:/srv:cached
       - /srv/node_modules
       - /srv/.next
-    command: npm run dev
+    # Turbopack instead of webpack: the same tree compiles in a fraction of the
+    # time and holds far less resident memory, which matters on a 2.8GB VM.
+    # Fall back to `npm run dev` if a Turbopack gap ever bites.
+    command: npm run dev:turbo
 
 volumes:
   pgdata:

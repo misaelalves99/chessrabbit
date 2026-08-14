@@ -283,7 +283,7 @@ export default function PuzzlesPage() {
       <header className="flex items-center gap-3 mb-4 flex-wrap">
         <Link href="/app" className="btn">← Board</Link>
         <Link href="/train" className="btn">♞ Repertoire</Link>
-        <h1 className="font-display text-xl font-bold">🧩 Puzzles</h1>
+        <h1 className="font-display text-xl">Puzzles</h1>
         {mode === "practice" && stats && (
           <span className="ml-auto flex items-center gap-4 text-sm">
             <span>
@@ -304,7 +304,7 @@ export default function PuzzlesPage() {
             </span>
             <span className="flex gap-1" title="Strikes">
               {Array.from({ length: RUSH_STRIKES }).map((_, i) => (
-                <span key={i} className={i < rush.strikes ? "text-red-400" : "text-muted"}>
+                <span key={i} className={i < rush.strikes ? "text-bad" : "text-muted"}>
                   ✗
                 </span>
               ))}
@@ -323,7 +323,7 @@ export default function PuzzlesPage() {
               mode === m ? "bg-accent text-black font-semibold" : "bg-panelAlt text-muted hover:text-ink"
             }`}
           >
-            {m === "practice" ? "Practice" : "⚡ Puzzle Rush"}
+            {m === "practice" ? "Practice" : "Puzzle Rush"}
           </button>
         ))}
         {mode === "practice" && themes.length > 0 && (
@@ -353,14 +353,14 @@ export default function PuzzlesPage() {
       )}
 
       {error && (
-        <p className="text-sm text-red-400 mb-3 cursor-pointer" onClick={() => setError(null)}>
+        <p className="text-sm text-bad mb-3 cursor-pointer" onClick={() => setError(null)}>
           {error} (dismiss)
         </p>
       )}
 
       <div className="flex flex-col lg:flex-row gap-6">
         {showBoard && (
-          <div className="w-[min(92vw,440px)] shrink-0">
+          <div className="board-frame w-[min(92vw,440px)] shrink-0">
             <Chessboard
               position={fen}
               onPieceDrop={onDrop}
@@ -368,7 +368,6 @@ export default function PuzzlesPage() {
               boardOrientation={orientation}
               arePiecesDraggable={status === "solving"}
               {...skin.props}
-
               animationDuration={skin.animationMs}
               customSquareStyles={squareStyles}
             />
@@ -388,7 +387,7 @@ export default function PuzzlesPage() {
                 </>
               ) : (
                 <>
-                  <p className="text-2xl font-bold">⚡ Puzzle Rush</p>
+                  <p className="text-2xl font-bold">Puzzle Rush</p>
                   <p className="text-sm text-muted">
                     Solve as many as you can. {RUSH_STRIKES} strikes and you&apos;re out.
                     Difficulty climbs as you go. Doesn&apos;t affect your rating.
@@ -407,7 +406,7 @@ export default function PuzzlesPage() {
             <div className="bg-panelAlt rounded p-4">
               <p className="text-lg font-semibold flex items-center gap-2">
                 <span
-                  className={`w-4 h-4 rounded-full border border-white/40 ${
+                  className={`w-4 h-4 rounded-full border border-ivory/40 ${
                     orientation === "white" ? "bg-white" : "bg-black"
                   }`}
                 />
@@ -421,7 +420,7 @@ export default function PuzzlesPage() {
 
           {/* Rush verdict flash (no reveal, auto-advances) */}
           {mode === "rush" && rushActive && (status === "solved" || status === "failed") && (
-            <div className={`rounded p-4 ${status === "solved" ? "bg-accent/20" : "bg-red-500/20"}`}>
+            <div className={`rounded p-4 ${status === "solved" ? "bg-accent/20" : "bg-bad/20"}`}>
               <p className="text-lg font-semibold">
                 {status === "solved" ? "✓ Correct" : "✗ Strike"}
               </p>
@@ -445,8 +444,8 @@ export default function PuzzlesPage() {
 
           {/* Practice: failed -> reveal the move, offer retry / show solution */}
           {mode === "practice" && status === "failed" && (
-            <div className="bg-red-500/20 rounded p-4 space-y-2">
-              <p className="text-lg font-semibold text-red-300">✗ Not quite</p>
+            <div className="bg-bad/20 rounded p-4 space-y-2">
+              <p className="text-lg font-semibold text-bad">✗ Not quite</p>
               {expectedSan && (
                 <p className="text-sm">
                   The move was <span className="font-mono font-bold">{expectedSan}</span>.
@@ -491,7 +490,7 @@ export default function PuzzlesPage() {
               {puzzle.themes.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {puzzle.themes.map((t) => (
-                    <span key={t} className="bg-white/5 rounded px-1.5 py-0.5">{t}</span>
+                    <span key={t} className="bg-ivory/5 rounded px-1.5 py-0.5">{t}</span>
                   ))}
                 </div>
               )}
@@ -513,7 +512,7 @@ function RatingLine({ feedback }: { feedback: PuzzleAttemptResult }) {
   return (
     <p className="text-sm mt-2">
       Your rating: <span className="font-mono">{feedback.rating_after}</span>{" "}
-      <span className={up ? "text-accent" : "text-red-300"}>
+      <span className={up ? "text-accent" : "text-bad"}>
         ({up ? "+" : ""}{feedback.delta})
       </span>
     </p>

@@ -17,9 +17,12 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, insert, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.breaker import CircuitOpen, breaker
+from app.core.bulk import bulk_insert
 from app.core.chess_utils import parse_pgn, positions_of_game
 from app.core.config import settings
 from app.models import ExternalAccount, Game, GamePosition, User
@@ -29,7 +32,25 @@ log = logging.getLogger(__name__)
 PLATFORMS = ("lichess", "chesscom")
 MAX_SYNC_GAMES = 300  # per sync run; nightly cron catches up long histories
 _HEADERS = {"User-Agent": "ChessRabbit/0.1 (auto-import; noreply@chessrabbit.app)"}
-_TIMEOUT = httpx.Timeout(30.0, read=60.0)
+# connect gets its own short budget: a host that will not complete a TCP
+# handshake in 5s is down, and the generous read timeout is for streaming 300
+# games of PGN, not for waiting to find out whether anyone is home.
+_TIMEOUT = httpx.Timeout(30.0, connect=5.0, read=60.0)
+
+# One breaker per platform - Lichess being down says nothing about Chess.com.
+# The thresholds are deliberately looser than the explorer's: these calls are
+# user-initiated and infrequent, and a sync legitimately takes tens of seconds,
+# so there is no slow-call rule. What they do cap is how many syncs can be
+# parked on a dead platform at once.
+_BREAKERS = {
+    platform: breaker(
+        f"{platform}-api",
+        failure_threshold=4,
+        reset_after=60.0,
+        max_concurrency=6,
+    )
+    for platform in PLATFORMS
+}
 
 # Standard chess only: variant movetext (atomic, crazyhouse, ...) would poison
 # the position index, which assumes normal rules.
@@ -44,14 +65,36 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True)
 
 
+async def _get(
+    platform: str, client: httpx.AsyncClient, url: str, **kwargs
+) -> httpx.Response:
+    """
+    GET through the platform's circuit breaker.
+
+    A tripped circuit surfaces as PlatformError, the same type an unreachable
+    host already produced, so every caller's error handling covers it - the
+    only difference the user sees is that the answer arrives immediately
+    instead of after a timeout.
+    """
+    try:
+        return await _BREAKERS[platform].call(client.get, url, **kwargs)
+    except CircuitOpen as exc:
+        raise PlatformError(
+            f"{platform} is not responding right now - try again in a minute"
+        ) from exc
+
+
 async def verify_account(platform: str, username: str) -> str:
     """Confirm the account exists; return the platform's canonical username."""
     async with _client() as client:
         try:
             if platform == "lichess":
-                res = await client.get(f"https://lichess.org/api/user/{username}")
+                res = await _get(platform, client, f"https://lichess.org/api/user/{username}")
             else:
-                res = await client.get(f"https://api.chess.com/pub/player/{username.lower()}")
+                res = await _get(
+                    platform, client,
+                    f"https://api.chess.com/pub/player/{username.lower()}",
+                )
         except httpx.HTTPError as exc:
             raise PlatformError(f"{platform} is unreachable: {exc.__class__.__name__}") from exc
 
@@ -96,7 +139,8 @@ async def _fetch_lichess(
 
     async with _client() as client:
         try:
-            res = await client.get(
+            res = await _get(
+                "lichess", client,
                 f"https://lichess.org/api/games/user/{username}",
                 params=params,
                 headers={"Accept": "application/x-chess-pgn"},
@@ -127,7 +171,10 @@ async def _fetch_chesscom(
 
     async with _client() as client:
         try:
-            res = await client.get(f"https://api.chess.com/pub/player/{uname}/games/archives")
+            res = await _get(
+                "chesscom", client,
+                f"https://api.chess.com/pub/player/{uname}/games/archives",
+            )
         except httpx.HTTPError as exc:
             raise PlatformError(f"chess.com is unreachable: {exc.__class__.__name__}") from exc
 
@@ -147,7 +194,7 @@ async def _fetch_chesscom(
             if len(entries) >= max_games:
                 break
             try:
-                month_res = await client.get(archive_url)
+                month_res = await _get("chesscom", client, archive_url)
             except httpx.HTTPError as exc:
                 raise PlatformError(
                     f"chess.com is unreachable: {exc.__class__.__name__}"
@@ -232,6 +279,12 @@ async def _import_entries(
     imported = duplicates = capped = 0
     errors: list[str] = []
 
+    # Same shape as the PGN import in routers/games.py: build and validate
+    # every row first, then write the batch in two statements. A 300-game sync
+    # used to cost 300 flushes plus a position insert per ply.
+    rows: list[dict] = []
+    indexes: list[list[tuple[int, int, str]]] = []
+
     for parsed, ext_id in entries:
         if ext_id and ext_id in seen:
             duplicates += 1
@@ -240,25 +293,71 @@ async def _import_entries(
             capped += 1
             continue
         try:
-            game = Game(
-                owner_id=user.id,
-                source=source,
-                external_id=ext_id,
-                user_color=color_played(parsed, known),
+            positions = positions_of_game(parsed["movetext"])
+            rows.append({
+                "owner_id": user.id,
+                "source": source,
+                "external_id": ext_id,
+                "user_color": color_played(parsed, known),
                 **parsed,
-            )
-            db.add(game)
-            await db.flush()
-            for ply, zob, uci in positions_of_game(game.movetext):
-                db.add(GamePosition(game_id=game.id, ply=ply, zobrist=zob, move_uci=uci))
+            })
+            indexes.append(positions)
             if ext_id:
                 seen.add(ext_id)
             imported += 1
         except Exception as exc:  # keep importing the rest of the batch
             errors.append(str(exc)[:200])
 
+    if rows:
+        try:
+            await _write_batch(db, rows, indexes)
+        except IntegrityError:
+            # games has a UNIQUE (owner_id, external_id). The `seen` set above
+            # catches every duplicate this process knows about, so reaching
+            # here means a concurrent sync of the same account inserted one
+            # first. One bad row must not cost the other 299, and a batch
+            # cannot skip a row mid-statement - so fall back to the row-at-a-
+            # time path, which loses only the games that genuinely collide.
+            await db.rollback()
+            log.info("Batch import collided; retrying %d games individually", len(rows))
+            imported = 0
+            for row, index in zip(rows, indexes):
+                # SAVEPOINT per game: a plain rollback here would discard the
+                # games this loop already re-inserted, not just the one that
+                # collided.
+                try:
+                    async with db.begin_nested():
+                        await _write_batch(db, [row], [index])
+                    imported += 1
+                except IntegrityError:
+                    duplicates += 1
+
     await db.commit()
     return imported, duplicates, capped, errors
+
+
+async def _write_batch(
+    db: AsyncSession,
+    rows: list[dict],
+    indexes: list[list[tuple[int, int, str]]],
+) -> None:
+    """Insert games and their position index in two statements."""
+    # sort_by_parameter_order is what makes the zip below correct: without it
+    # Postgres may return the ids in any order, and every position row would
+    # be filed against the wrong game.
+    result = await db.execute(
+        insert(Game).returning(Game.id, sort_by_parameter_order=True), rows
+    )
+    game_ids = [r[0] for r in result]
+    await bulk_insert(
+        db,
+        GamePosition,
+        [
+            {"game_id": game_id, "ply": ply, "zobrist": zob, "move_uci": uci}
+            for game_id, index in zip(game_ids, indexes)
+            for ply, zob, uci in index
+        ],
+    )
 
 
 async def sync_account(db: AsyncSession, user: User, account: ExternalAccount) -> dict:

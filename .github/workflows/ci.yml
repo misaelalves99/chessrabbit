@@ -28,14 +28,24 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install API deps
-        run: pip install -r apps/api/requirements.txt ruff
+        # requirements-dev pulls in requirements plus pytest; installing the
+        # runtime file alone is why the tests under apps/api/tests never ran.
+        run: pip install -r apps/api/requirements-dev.txt
       - name: Lint
         run: ruff check apps/api services/engine pipeline
-      - name: Apply schema
+      - name: Apply migrations
+        # Every migration, in filename order — the same order initdb applies
+        # them to a fresh docker volume. Only 001 used to run here, so 002
+        # onward reached production having never been executed anywhere except
+        # a developer's own database. ON_ERROR_STOP makes psql exit non-zero;
+        # without it a failed statement is a printed notice and a green build.
         run: |
           sudo apt-get install -y postgresql-client
-          PGPASSWORD=devpassword psql -h 127.0.0.1 -U chessrabbit -d chessrabbit \
-            -f db/migrations/001_initial_schema.sql
+          for f in db/migrations/*.sql; do
+            echo "── $f"
+            PGPASSWORD=devpassword psql -v ON_ERROR_STOP=1 --quiet \
+              -h 127.0.0.1 -U chessrabbit -d chessrabbit -f "$f"
+          done
       - name: Import check
         working-directory: apps/api
         env:
@@ -43,6 +53,16 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379/0
           JWT_SECRET: ci-secret
         run: python -c "from app.main import app; print('routes:', len(app.openapi()['paths']))"
+      - name: Tests
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://chessrabbit:devpassword@127.0.0.1:5432/chessrabbit
+          REDIS_URL: redis://127.0.0.1:6379/0
+          JWT_SECRET: ci-secret
+          # Read by tests/test_schema_matches_migrations.py, which compares the
+          # models against the database the step above just built.
+          CHESSRABBIT_TEST_DB: postgresql+asyncpg://chessrabbit:devpassword@127.0.0.1:5432/chessrabbit
+        run: python -m pytest -q
 
   engine:
     runs-on: ubuntu-latest

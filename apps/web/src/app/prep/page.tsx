@@ -63,7 +63,7 @@ export default function PrepPage() {
     <div className="min-h-screen p-4 max-w-4xl mx-auto">
       <header className="flex items-center gap-3 mb-6 flex-wrap">
         <Link href="/app" className="btn">← Board</Link>
-        <h1 className="font-display text-xl font-bold">🎯 Opponent Prep</h1>
+        <h1 className="font-display text-xl">🎯 Opponent Prep</h1>
         {me && (
           <span className="ml-auto text-xs text-muted uppercase tracking-wide">
             {me.plan} plan
@@ -73,7 +73,7 @@ export default function PrepPage() {
 
       {me && !isMaster && (
         <div className="bg-panelAlt/60 border border-accent/40 rounded-xl p-8 text-center space-y-3">
-          <p className="text-2xl font-display font-bold">Know them before you sit down</p>
+          <p className="text-2xl font-display">Know them before you sit down</p>
           <p className="text-muted max-w-lg mx-auto">
             Scout any chess.com or Lichess player: what they open with, how they
             score with it, and a ready-made counter-repertoire built from how
@@ -87,7 +87,7 @@ export default function PrepPage() {
 
       {isMaster && (
         <>
-          <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4 flex gap-2 flex-wrap items-end">
+          <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4 flex gap-2 flex-wrap items-end">
             <div>
               <label className="text-xs text-muted block mb-1">Platform</label>
               <select
@@ -119,7 +119,7 @@ export default function PrepPage() {
           </div>
 
           {error && (
-            <p className="text-sm text-red-400 mt-4 cursor-pointer" onClick={() => setError(null)}>
+            <p className="text-sm text-bad mt-4 cursor-pointer" onClick={() => setError(null)}>
               {error} (dismiss)
             </p>
           )}
@@ -136,7 +136,7 @@ export default function PrepPage() {
                 <LineTable title="When they play Black" lines={dossier.as_black} />
               </div>
 
-              <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4 flex gap-3 items-center flex-wrap">
+              <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4 flex gap-3 items-center flex-wrap">
                 <span className="text-sm">Build a counter-repertoire — I&apos;ll play</span>
                 <select
                   className="input w-28"
@@ -170,8 +170,8 @@ export default function PrepPage() {
 
 function LineTable({ title, lines }: { title: string; lines: PrepLine[] }) {
   return (
-    <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4">
-      <h3 className="font-display font-semibold text-sm mb-2">{title}</h3>
+    <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4">
+      <h3 className="font-semibold text-sm mb-2">{title}</h3>
       {lines.length === 0 ? (
         <p className="text-xs text-muted">No recent games with this colour.</p>
       ) : (
@@ -187,7 +187,7 @@ function LineTable({ title, lines }: { title: string; lines: PrepLine[] }) {
                 <div className="flex h-1.5 rounded overflow-hidden mt-1 bg-black/30">
                   <div className="bg-accent" style={{ width: `${(100 * l.wins) / total}%` }} />
                   <div className="bg-muted/60" style={{ width: `${(100 * l.draws) / total}%` }} />
-                  <div className="bg-red-400/70" style={{ width: `${(100 * l.losses) / total}%` }} />
+                  <div className="bg-bad/70" style={{ width: `${(100 * l.losses) / total}%` }} />
                 </div>
               </li>
             );

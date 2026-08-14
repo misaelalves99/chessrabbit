@@ -222,7 +222,7 @@ export default function ClockDrillPage() {
       out.push("✓ Good allocation: quick on the simple positions, invested where it mattered.");
     }
     if (results.length < ROUNDS && clock <= 0) {
-      out.push(`⏱ The clock beat you at puzzle ${results.length + 1} — earlier savings buy later thinking time.`);
+      out.push(`The clock beat you at puzzle ${results.length + 1} — earlier savings buy later thinking time.`);
     }
     if (results.length >= ROUNDS && clock > 30) {
       out.push(`✓ Finished with ${clock}s to spare — you could afford deeper thought on the hard ones.`);
@@ -238,11 +238,11 @@ export default function ClockDrillPage() {
     <div className="min-h-screen p-4 max-w-5xl mx-auto">
       <header className="flex items-center gap-3 mb-4 flex-wrap">
         <Link href="/train" className="btn">← Training</Link>
-        <h1 className="font-display text-xl font-bold">⏱ Time Bank</h1>
+        <h1 className="font-display text-xl">Time bank</h1>
         {phase !== "idle" && phase !== "done" && (
           <span className="ml-auto flex items-center gap-4 text-sm">
             <span className="text-muted">Puzzle {round}/{ROUNDS}</span>
-            <span className={`font-mono text-lg font-bold ${clock <= 30 ? "text-red-400" : ""}`}>
+            <span className={`font-mono text-lg font-bold ${clock <= 30 ? "text-bad" : ""}`}>
               {mins}:{String(secs).padStart(2, "0")}
             </span>
           </span>
@@ -256,14 +256,14 @@ export default function ClockDrillPage() {
         </div>
       )}
       {error && (
-        <p className="text-sm text-red-400 mb-3 cursor-pointer" onClick={() => setError(null)}>
+        <p className="text-sm text-bad mb-3 cursor-pointer" onClick={() => setError(null)}>
           {error} (dismiss)
         </p>
       )}
 
       {phase === "idle" && (
-        <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-8 text-center space-y-3 max-w-xl mx-auto">
-          <p className="text-2xl font-display font-bold">One clock. Ten puzzles.</p>
+        <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-8 text-center space-y-3 max-w-xl mx-auto">
+          <p className="text-2xl font-display">One clock. Ten puzzles.</p>
           <p className="text-muted">
             3:00 for {ROUNDS} puzzles and the difficulties are hidden and wildly
             mixed. Spend seconds where they buy nothing and you&apos;ll have none
@@ -277,8 +277,8 @@ export default function ClockDrillPage() {
 
       {phase === "done" && (
         <div className="max-w-xl mx-auto space-y-4">
-          <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-6 text-center">
-            <p className="text-2xl font-display font-bold">
+          <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-6 text-center">
+            <p className="text-2xl font-display">
               {solved} / {ROUNDS} solved
             </p>
             <p className="text-sm text-muted mt-1">
@@ -288,7 +288,7 @@ export default function ClockDrillPage() {
             </p>
           </div>
 
-          <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4">
+          <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4">
             <table className="w-full text-sm">
               <thead className="text-muted text-xs">
                 <tr>
@@ -304,7 +304,7 @@ export default function ClockDrillPage() {
                     <td className="py-0.5 text-muted">{i + 1}</td>
                     <td>{r.rating < EASY_CUTOFF ? "easy" : "hard"} ({r.rating})</td>
                     <td className="text-right">{r.seconds.toFixed(0)}s</td>
-                    <td className={`text-right ${r.solved ? "text-accent" : "text-red-400"}`}>
+                    <td className={`text-right ${r.solved ? "text-accent" : "text-bad"}`}>
                       {r.solved ? "✓" : "✗"}
                     </td>
                   </tr>
@@ -313,7 +313,7 @@ export default function ClockDrillPage() {
             </table>
           </div>
 
-          <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4 space-y-1">
+          <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4 space-y-1">
             {advice().map((a) => (
               <p key={a} className="text-sm">{a}</p>
             ))}
@@ -328,7 +328,7 @@ export default function ClockDrillPage() {
       {(phase === "solving" || phase === "opponent" || phase === "intro" ||
         phase === "loading" || phase === "flash") && (
         <div className="flex flex-col lg:flex-row gap-6">
-          <div className="w-[min(92vw,480px)] shrink-0">
+          <div className="board-frame w-[min(92vw,480px)] shrink-0">
             <Chessboard
               position={fen}
               onPieceDrop={onMove}
@@ -336,17 +336,16 @@ export default function ClockDrillPage() {
               boardOrientation={orientation}
               arePiecesDraggable={phase === "solving"}
               {...skin.props}
-
               animationDuration={skin.animationMs}
               customSquareStyles={squareStyles}
             />
           </div>
 
           <aside className="flex-1 space-y-3 min-w-[260px]">
-            <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4">
+            <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4">
               <p className="text-lg font-semibold flex items-center gap-2">
                 <span
-                  className={`w-4 h-4 rounded-full border border-white/40 ${
+                  className={`w-4 h-4 rounded-full border border-ivory/40 ${
                     orientation === "white" ? "bg-white" : "bg-black"
                   }`}
                 />
@@ -361,7 +360,7 @@ export default function ClockDrillPage() {
               </p>
             </div>
             {phase === "flash" && lastVerdict !== null && (
-              <div className={`rounded-xl p-3 ${lastVerdict ? "bg-accent/20" : "bg-red-500/20"}`}>
+              <div className={`rounded-xl p-3 ${lastVerdict ? "bg-accent/20" : "bg-bad/20"}`}>
                 <p className="font-semibold">{lastVerdict ? "✓ Solved" : "✗ Missed"} — next…</p>
               </div>
             )}

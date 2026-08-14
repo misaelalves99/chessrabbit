@@ -14,17 +14,24 @@ import { Chess, Square } from "chess.js";
  * Pass `enabled: false` to disable selection (e.g. while a solution animates).
  * Returns `squareStyles` to merge into the board's `customSquareStyles`.
  */
+/**
+ * One empty map, reused. Clearing to a fresh `{}` is a state change by
+ * identity alone, and since a clear happens on every position change that
+ * re-rendered the board once per move for a selection nobody had made.
+ */
+const NO_TARGETS: Record<string, boolean> = {};
+
 export function useClickToMove(
   fen: string,
   onMove: (from: string, to: string) => boolean,
   enabled = true,
 ) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [targets, setTargets] = useState<Record<string, boolean>>({}); // square -> isCapture
+  const [targets, setTargets] = useState<Record<string, boolean>>(NO_TARGETS); // square -> isCapture
 
   const clearSelection = useCallback(() => {
     setSelected(null);
-    setTargets({});
+    setTargets(NO_TARGETS);
   }, []);
 
   // A new position (move made, board navigation) or a disable cancels selection.

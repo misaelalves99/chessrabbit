@@ -3,19 +3,28 @@
 /**
  * Game Review: the coach's verdict on the move you are looking at, an accuracy
  * summary, a clickable evaluation curve, and per-side verdict counts.
- * Everything here comes from the server's engine review - no client analysis.
+ *
+ * The summary, the curve and the counts are the server's review of the game
+ * that was played, and only ever that. The callout at the top is the one part
+ * that also speaks for a move the server never saw: step into a line you tried
+ * and it explains that move instead, from the live engine, saying so plainly.
+ * A move you invented deserves the same sentence as a move you played - it is
+ * the sentence, not the badge, that teaches you anything.
  */
 
 import { useMemo, useRef } from "react";
-import { Chess } from "chess.js";
 import { Annotation, Classification, ReviewSummary } from "@/lib/api";
-import { CLASS_META, CLASS_ORDER, headline } from "@/lib/classification";
+import { CLASS_META, CLASS_ORDER } from "@/lib/classification";
 
-const DOT_FILL: Partial<Record<Classification, string>> = {
-  inaccuracy: "#FFC53D",
-  mistake: "#FF9F3D",
-  blunder: "#FF5F63",
-};
+/**
+ * Only the three verdicts worth interrupting the eval curve for get a dot.
+ * The fills come from CLASS_META so the dot on the curve, the badge on the
+ * board, and the move in the list are never three different yellows.
+ */
+const DOTTED: Classification[] = ["inaccuracy", "mistake", "blunder"];
+const DOT_FILL: Partial<Record<Classification, string>> = Object.fromEntries(
+  DOTTED.map((c) => [c, CLASS_META[c].bg])
+);
 
 /** Same logistic centipawn -> win% mapping the server uses. */
 function winPct(cp: number): number {
@@ -30,6 +39,16 @@ function evalText(cp: number | null): string {
   return (p >= 0 ? "+" : "") + p.toFixed(1);
 }
 
+/** The engine's verdict on the move under the cursor, when no review covers it. */
+export interface LiveCallout {
+  san: string;
+  cls: Classification;
+  /** White-positive centipawns after the move. */
+  cp: number;
+  why: string;
+  bestSan: string | null;
+}
+
 interface Props {
   history: string[];
   annotations: Annotation[];
@@ -39,8 +58,6 @@ interface Props {
   reviewing: boolean;
   onRun: () => void;
   canRun: boolean;
-  /** Put the engine's preference on the board, beside the move that was played. */
-  onShowBest?: (san: string) => void;
 }
 
 export default function ReviewPanel({
@@ -52,7 +69,6 @@ export default function ReviewPanel({
   reviewing,
   onRun,
   canRun,
-  onShowBest,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const byPly = useMemo(() => {
@@ -113,119 +129,14 @@ export default function ReviewPanel({
 
   // The move the cursor just played (annotation of ply cursor-1)
   const current = cursor > 0 ? byPly.get(cursor - 1) : undefined;
-  const currentMeta = current?.classification
-    ? CLASS_META[current.classification]
-    : null;
-
-  // Best-move SAN for the why box, derived client-side with chess.js
-  const bestSan = useMemo(() => {
-    if (!current?.best_uci || cursor === 0) return null;
-    try {
-      const g = new Chess();
-      for (let i = 0; i < cursor - 1; i++) g.move(history[i]);
-      const mv = g.move({
-        from: current.best_uci.slice(0, 2),
-        to: current.best_uci.slice(2, 4),
-        promotion: current.best_uci[4] ?? "q",
-      });
-      return mv?.san ?? null;
-    } catch {
-      return null;
-    }
-  }, [current, cursor, history]);
 
   return (
     <div className="space-y-3">
-      {/* ---------- Coach callout ---------- */}
-      <div className="flex items-start gap-2.5">
-        <div
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-xl
-                     bg-gradient-to-br from-accent/30 to-accent2/20 ring-1 ring-white/10"
-          aria-hidden
-        >
-          🐰
-        </div>
-
-        {current && currentMeta ? (
-          <div
-            key={cursor}
-            className="relative flex-1 animate-rise rounded-2xl rounded-tl-sm bg-panelAlt/90 p-3
-                       ring-1 ring-white/[0.08] shadow-card"
-            style={{ borderLeft: `3px solid ${currentMeta.bg}` }}
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="grid h-6 w-6 shrink-0 place-items-center rounded-full font-bold text-white animate-pop"
-                style={{
-                  background: currentMeta.bg,
-                  fontSize: currentMeta.glyph.length > 1 ? 11 : 14,
-                }}
-              >
-                {currentMeta.glyph}
-              </span>
-              <span className="text-sm font-semibold leading-tight">
-                {/* The server's SAN wins: it comes from the same parse the
-                    review was written against, so the headline can never
-                    disagree with the sentence underneath it. */}
-                {headline(
-                  current.move_san ?? history[cursor - 1] ?? "",
-                  current.classification!
-                )}
-              </span>
-              <span className="ml-auto shrink-0 rounded-md bg-black/30 px-1.5 py-0.5 font-mono text-xs">
-                {evalText(current.eval_cp)}
-              </span>
-            </div>
-
-            {current.review && (
-              <p className="mt-2 text-xs leading-relaxed text-ink/75">{current.review}</p>
-            )}
-            {/* Telling you what you should have played and giving you no way
-                to see it was only ever a limitation of a move list that had to
-                delete the game to show you. It doesn't any more. */}
-            {bestSan &&
-              current.classification !== "best" &&
-              current.classification !== "book" &&
-              (onShowBest ? (
-                <button
-                  onClick={() => onShowBest(bestSan)}
-                  className="mt-1.5 flex items-center gap-1.5 rounded-md border border-accent/30
-                             bg-accent/10 px-2 py-1 text-xs text-accent transition-colors
-                             hover:bg-accent/20"
-                >
-                  Best was <span className="font-mono font-semibold">{bestSan}</span>
-                  <span className="text-accent/70">— show me</span>
-                </button>
-              ) : (
-                <p className="mt-1.5 text-xs text-accent">
-                  Best was <span className="font-mono font-semibold">{bestSan}</span>
-                </p>
-              ))}
-          </div>
-        ) : (
-          <div className="flex-1 rounded-2xl rounded-tl-sm bg-panelAlt/70 p-3 ring-1 ring-white/[0.06]">
-            <p className="text-sm font-semibold">
-              {reviewing
-                ? "Going through every move…"
-                : hasReview
-                  ? "Step through the game"
-                  : canRun
-                    ? "Ready when you are"
-                    : "Open a game to review it"}
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-muted">
-              {reviewing
-                ? "The engine is scoring both sides. This takes a few seconds."
-                : hasReview
-                  ? "Pick a move and I'll tell you what happened."
-                  : canRun
-                    ? "I'll classify every move, score both sides, and show you what you missed."
-                    : "Pick one of your games from the rail — or import a PGN — and I'll review it."}
-            </p>
-          </div>
-        )}
-      </div>
-
+      {/* The per-move verdict used to open this panel. It is a fixed plate
+          above the tab strip now (components/VerdictPlate.tsx), because it is
+          the screen's job rather than one of four views of the game. What is
+          left here is the GAME-level report: how accurate each side was, where
+          the evaluation moved, and how many of each verdict there were. */}
       {canRun && (
         <button
           className={`w-full text-sm ${hasReview ? "btn" : "btn-primary"}`}
@@ -234,13 +145,13 @@ export default function ReviewPanel({
         >
           {reviewing ? (
             <span className="inline-flex items-center gap-2">
-              <span className="h-1.5 w-1.5 animate-ping rounded-full bg-white" />
+              <span className="h-1.5 w-1.5 animate-ping rounded-full bg-current" />
               Reviewing…
             </span>
           ) : hasReview ? (
             "Re-run review"
           ) : (
-            "▶  Review this game"
+            "Review this game"
           )}
         </button>
       )}
@@ -254,12 +165,12 @@ export default function ReviewPanel({
               className="card-tight flex items-center gap-2 px-2.5 py-2"
             >
               <span
-                className={`h-3.5 w-3.5 shrink-0 rounded-[3px] ring-1 ring-white/30 ${
-                  side === "white" ? "bg-white" : "bg-[#0B1020]"
+                className={`h-3.5 w-3.5 shrink-0 rounded-[3px] ring-1 ring-ivory/30 ${
+                  side === "white" ? "bg-ivory" : "bg-ebony"
                 }`}
               />
               <div className="min-w-0">
-                <div className="font-display text-lg font-bold leading-none">
+                <div className="font-display text-lg leading-none">
                   {summary.accuracy[side].toFixed(1)}
                   <span className="text-xs text-muted">%</span>
                 </div>
@@ -278,16 +189,21 @@ export default function ReviewPanel({
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
-          className="h-20 w-full cursor-crosshair rounded-xl bg-[#0B1020] ring-1 ring-white/[0.06]"
+          className="h-20 w-full cursor-crosshair rounded-xl bg-ebony ring-1 ring-ivory/[0.08]"
           onPointerDown={seekFromPointer}
           onPointerMove={(e) => e.buttons === 1 && seekFromPointer(e)}
           role="img"
           aria-label="Evaluation over the course of the game — click to jump to a move"
         >
           <defs>
+            {/* The filled area is White's territory, so it is the ivory of the
+                white pieces rather than a chart colour — but pulled back from
+                the near-white it used to be. On the ink ground that read as a
+                blown-out cloud that outshone the verdict dots sitting on it,
+                which are the only part of this chart you are meant to click. */}
             <linearGradient id="evalFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.95" />
-              <stop offset="100%" stopColor="#B9C2E6" stopOpacity="0.75" />
+              <stop offset="0%" stopColor="#EFEBE0" stopOpacity="0.82" />
+              <stop offset="100%" stopColor="#B9B3A4" stopOpacity="0.6" />
             </linearGradient>
           </defs>
           <path d={graph.path} fill="url(#evalFill)" />
@@ -296,7 +212,7 @@ export default function ReviewPanel({
             y1={H / 2}
             x2={W}
             y2={H / 2}
-            stroke="#8B7CFF"
+            stroke="#3FBFA3"
             strokeWidth={0.6}
             strokeDasharray="3 3"
             opacity={0.7}
@@ -308,7 +224,7 @@ export default function ReviewPanel({
               cy={d.y}
               r={3}
               fill={d.fill}
-              stroke="#0B1020"
+              stroke="#16202F"
               strokeWidth={1}
             />
           ))}
@@ -318,7 +234,7 @@ export default function ReviewPanel({
               y1={0}
               x2={(cursor / N) * W}
               y2={H}
-              stroke="#2FE3E8"
+              stroke="#8B7BE8"
               strokeWidth={1.5}
             />
           )}
@@ -342,7 +258,7 @@ export default function ReviewPanel({
               if (w === 0 && b === 0) return null;
               const meta = CLASS_META[cls];
               return (
-                <tr key={cls} className="hover:bg-white/[0.04]">
+                <tr key={cls} className="hover:bg-ivory/[0.04]">
                   <td className="py-0.5">
                     <span className="inline-flex items-center gap-1.5">
                       <span

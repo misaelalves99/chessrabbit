@@ -45,7 +45,7 @@ function ResetForm() {
     return (
       <p className="text-sm text-muted">
         This reset link is malformed.{" "}
-        <Link href="/forgot" className="text-accent hover:underline">
+        <Link href="/forgot" className="text-brassLit hover:underline">
           Request a new one
         </Link>
         .
@@ -55,7 +55,7 @@ function ResetForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-bad">{error}</p>}
       <input
         className="input"
         type="password"
@@ -83,7 +83,7 @@ export default function ResetPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-bold">Choose a new password</h1>
+        <h1 className="font-display text-3xl leading-none">Choose a new password</h1>
         <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
           <ResetForm />
         </Suspense>

@@ -205,7 +205,7 @@ export default function IntuitionPage() {
     <div className="min-h-screen p-4 max-w-5xl mx-auto">
       <header className="flex items-center gap-3 mb-4 flex-wrap">
         <Link href="/train" className="btn">← Training</Link>
-        <h1 className="font-display text-xl font-bold">🧠 Intuition</h1>
+        <h1 className="font-display text-xl">Intuition</h1>
         {phase !== "idle" && phase !== "done" && (
           <span className="ml-auto flex items-center gap-4 text-sm">
             <span className="text-muted">Round {round}/{ROUNDS}</span>
@@ -224,14 +224,14 @@ export default function IntuitionPage() {
         </div>
       )}
       {error && (
-        <p className="text-sm text-red-400 mb-3 cursor-pointer" onClick={() => setError(null)}>
+        <p className="text-sm text-bad mb-3 cursor-pointer" onClick={() => setError(null)}>
           {error} (dismiss)
         </p>
       )}
 
       {phase === "idle" && (
-        <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-8 text-center space-y-3 max-w-xl mx-auto">
-          <p className="text-2xl font-display font-bold">Guess the master&apos;s move</p>
+        <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-8 text-center space-y-3 max-w-xl mx-auto">
+          <p className="text-2xl font-display">Guess the master&apos;s move</p>
           <p className="text-muted">
             Ten positions from real master games. {SECONDS} seconds each — no
             time to calculate, only to feel. You score by matching the move the
@@ -244,8 +244,8 @@ export default function IntuitionPage() {
       )}
 
       {phase === "done" && (
-        <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-8 text-center space-y-3 max-w-xl mx-auto">
-          <p className="text-2xl font-display font-bold">
+        <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-8 text-center space-y-3 max-w-xl mx-auto">
+          <p className="text-2xl font-display">
             {hits >= 7 ? "Sharp instincts! 🎯" : hits >= 4 ? "Solid feel for the game" : "Keep training that gut"}
           </p>
           <p className="text-lg">
@@ -263,7 +263,7 @@ export default function IntuitionPage() {
 
       {(phase === "answer" || phase === "feedback" || phase === "loading") && (
         <div className="flex flex-col lg:flex-row gap-6">
-          <div className="w-[min(92vw,480px)] shrink-0">
+          <div className="board-frame w-[min(92vw,480px)] shrink-0">
             <Chessboard
               position={fen}
               onPieceDrop={onMove}
@@ -271,7 +271,6 @@ export default function IntuitionPage() {
               boardOrientation={orientation}
               arePiecesDraggable={phase === "answer" && !judging}
               {...skin.props}
-
               animationDuration={skin.animationMs}
               customSquareStyles={squareStyles}
             />
@@ -279,7 +278,7 @@ export default function IntuitionPage() {
 
           <aside className="flex-1 space-y-3 min-w-[260px]">
             {pos && (
-              <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4">
+              <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4">
                 <p className="text-xs text-muted">
                   {pos.white} ({pos.white_elo ?? "?"}) vs {pos.black} ({pos.black_elo ?? "?"})
                   · move {Math.floor(pos.ply / 2) + 1}
@@ -291,16 +290,16 @@ export default function IntuitionPage() {
             )}
 
             {phase === "answer" && (
-              <div className="bg-panelAlt/60 border border-white/5 rounded-xl p-4">
+              <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4">
                 <div className="flex justify-between text-sm mb-2">
                   <span className="text-muted">Trust your gut</span>
-                  <span className={`font-mono font-bold ${timeLeft <= 5 ? "text-red-400" : ""}`}>
+                  <span className={`font-mono font-bold ${timeLeft <= 5 ? "text-bad" : ""}`}>
                     {timeLeft.toFixed(1)}s
                   </span>
                 </div>
                 <div className="h-2 bg-black/30 rounded overflow-hidden">
                   <div
-                    className={`h-full ${timeLeft <= 5 ? "bg-red-400" : "bg-accent"}`}
+                    className={`h-full ${timeLeft <= 5 ? "bg-bad" : "bg-accent"}`}
                     style={{ width: `${(100 * timeLeft) / SECONDS}%`, transition: "width 0.1s linear" }}
                   />
                 </div>
@@ -311,7 +310,7 @@ export default function IntuitionPage() {
             )}
 
             {phase === "feedback" && feedback && (
-              <div className={`rounded-xl p-4 ${feedback.hit ? "bg-accent/20" : "bg-panelAlt/60 border border-white/5"}`}>
+              <div className={`rounded-xl p-4 ${feedback.hit ? "bg-accent/20" : "bg-panelAlt/60 border border-ivory/5"}`}>
                 <p className="text-lg font-semibold">
                   {feedback.hit ? "✓ Hit!" : "✗ Miss"}
                 </p>

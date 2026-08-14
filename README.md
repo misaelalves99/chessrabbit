@@ -11,6 +11,21 @@ Chess.com, see [`docs/GROWTH_ROADMAP.md`](./docs/GROWTH_ROADMAP.md). It is the s
 architecture, data model, licensing rules, and the 16-week roadmap. This README
 only covers getting the code running.
 
+## Before you deploy this anywhere public
+
+Read [`docs/SECURITY.md`](./docs/SECURITY.md). Two things there are not
+optional:
+
+- **Rotate every credential that has ever been in a shell, a file, or this
+  repository before the site takes real traffic.** `devpassword`,
+  `dev-secret-change-me` and the demo account passwords in
+  `pipeline/seed_demo_users.py` are published here, and git keeps whatever was
+  committed even after it is edited out — rewriting a file does not rewrite
+  history.
+- **Never run `pipeline/seed_demo_users.py` against a real database.** It
+  creates an admin account whose password is printed in this repository. It
+  refuses to run unless `ENVIRONMENT=development` is set explicitly.
+
 ## Quickstart (Docker)
 
 ```bash

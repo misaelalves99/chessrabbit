@@ -7,6 +7,16 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
 
 export interface EngineState {
   lines: EvalLine[];
+  /**
+   * The position `lines` describe.
+   *
+   * Not always the position on the board: the board waits for the cursor to
+   * settle before asking, so for a moment after a move the lines still belong
+   * to where you just were. Anything that reads a score into a record - or
+   * turns a PV into SAN - has to key off this rather than off the board, or it
+   * files the previous position's evaluation against the current one.
+   */
+  fen: string | null;
   depth: number;
   thinking: boolean;
   connected: boolean;
@@ -26,6 +36,7 @@ export function useEngine() {
 
   const [state, setState] = useState<EngineState>({
     lines: [],
+    fen: null,
     depth: 0,
     thinking: false,
     connected: false,
@@ -90,8 +101,21 @@ export function useEngine() {
       }
     };
 
-    ws.onclose = () => {
-      setState((s) => ({ ...s, connected: false, thinking: false }));
+    ws.onclose = (event) => {
+      // 4401 (bad token) and 4429 (plan's live-board limit) are decisions, not
+      // blips: the same socket will be refused every time, so retrying every
+      // 2s just hammers the API — noticeably so with a second tab open, which
+      // is exactly what trips 4429. Surface the reason and stay down.
+      const refused = event.code === 4401 || event.code === 4429;
+      if (refused) shouldReconnect.current = false;
+
+      setState((s) => ({
+        ...s,
+        connected: false,
+        thinking: false,
+        error: refused ? event.reason || "Engine connection refused" : s.error,
+      }));
+
       if (shouldReconnect.current) {
         reconnectRef.current = setTimeout(connect, 2000);
       }
@@ -115,7 +139,7 @@ export function useEngine() {
   const analyse = useCallback((fen: string, depth = 22, multipv = 3) => {
     const ws = wsRef.current;
     if (ws?.readyState !== WebSocket.OPEN) return;
-    setState((s) => ({ ...s, lines: [], depth: 0, thinking: true, error: null }));
+    setState((s) => ({ ...s, lines: [], fen, depth: 0, thinking: true, error: null }));
     ws.send(JSON.stringify({ op: "start", fen, depth, multipv }));
   }, []);
 

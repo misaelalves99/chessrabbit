@@ -29,9 +29,9 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-bold">Sign in</h1>
+        <h1 className="font-display text-3xl leading-none">Sign in</h1>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-bad">{error}</p>}
 
         <input
           className="input"
@@ -56,11 +56,11 @@ export default function LoginPage() {
 
         <p className="text-sm text-muted">
           No account?{" "}
-          <Link href="/register" className="text-accent hover:underline">
+          <Link href="/register" className="text-brassLit hover:underline">
             Register
           </Link>
           {" · "}
-          <Link href="/forgot" className="text-accent hover:underline">
+          <Link href="/forgot" className="text-brassLit hover:underline">
             Forgot password?
           </Link>
         </p>

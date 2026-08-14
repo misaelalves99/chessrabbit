@@ -2,6 +2,7 @@ import {
   MoveTree,
   NodeId,
   ROOT,
+  START_FEN,
   addMove,
   annotate,
   createTree,
@@ -58,12 +59,20 @@ export interface ParsedPgn {
   headers: Record<string, string>;
 }
 
-export function parsePgn(pgn: string): ParsedPgn {
+/**
+ * `startFen` overrides the `[FEN]` header, for callers that hold the position
+ * somewhere more authoritative than the text - a study chapter's own row. It
+ * is not a default: passing it means the caller knows, and the header is a
+ * claim the same string was pasted with.
+ */
+export function parsePgn(pgn: string, startFen?: string): ParsedPgn {
   const headers: Record<string, string> = {};
   for (const m of pgn.matchAll(HEADER)) headers[m[1]] = m[2];
   const movetext = pgn.replace(HEADER, "");
 
-  let tree = createTree();
+  // A chapter that starts from a diagram rather than the opening array says so
+  // in its own headers, the way the format has always carried it.
+  let tree = createTree(startFen ?? headers.FEN);
   let cur: NodeId = ROOT;
   // Where to come back to when each open bracket closes.
   const stack: NodeId[] = [];
@@ -95,7 +104,14 @@ export function parsePgn(pgn: string): ParsedPgn {
     if (deadAt !== null) continue;
 
     if (head === "{") {
-      if (cur !== ROOT) tree = annotate(tree, cur, { comment: tok.slice(1, -1).trim() });
+      // A comment before the first move belongs to the starting position, and
+      // is where a study chapter's own text and shapes live. Only at the top
+      // level: inside a bracket the cursor sits on the root for a moment
+      // between `(` and the variation's first move, and a comment written
+      // there is about that line, not about the game.
+      if (cur !== ROOT || stack.length === 0) {
+        tree = annotate(tree, cur, { comment: tok.slice(1, -1).trim() });
+      }
       continue;
     }
     if (head === "$") {
@@ -141,22 +157,73 @@ const SEVEN_TAG: Record<string, string> = {
 /** How wide a movetext line gets before it wraps, as the spec suggests. */
 const WRAP = 80;
 
+/**
+ * Where the root sits on the real board's clock.
+ *
+ * A node's `ply` counts from the tree's own root, so in a chapter that starts
+ * from a diagram at move 23 every move would otherwise be numbered from 1.
+ * The FEN states the move number and the side to move, which is exactly the
+ * offset needed to put them back where they belong.
+ */
+function plyOffset(fen: string): number {
+  const [, turn, , , , fullmove] = fen.split(" ");
+  const no = parseInt(fullmove, 10);
+  if (!Number.isFinite(no) || no < 1) return 0;
+  return (no - 1) * 2 + (turn === "b" ? 1 : 0);
+}
+
 export function toPgn(tree: MoveTree, headers: Record<string, string> = {}): string {
-  const tags = { ...SEVEN_TAG, ...headers };
+  const root = tree.nodes.get(tree.root);
+  const fromDiagram = !!root && root.fen !== START_FEN;
+
+  // The tree is the authority on where it stands, not the headers it was
+  // opened with: a `FEN` tag left over from a source PGN would otherwise
+  // contradict the board the moves were actually played on.
+  const tags: Record<string, string> = { ...SEVEN_TAG, ...headers };
+  if (fromDiagram) {
+    // The pair is required. SetUp is what tells a reader the FEN is the start
+    // position rather than one reached partway through.
+    tags.SetUp = "1";
+    tags.FEN = root!.fen;
+  } else {
+    delete tags.SetUp;
+    delete tags.FEN;
+  }
+
   const head = Object.entries(tags)
     .map(([k, v]) => `[${k} "${v}"]`)
     .join("\n");
 
-  const first = tree.nodes.get(tree.root)?.children[0];
-  const body = first === undefined ? [] : lineText(tree, first, true);
-  return `${head}\n\n${wrap([...body, tags.Result])}\n`;
+  return `${head}\n\n${wrap([...movetextTokens(tree), tags.Result])}\n`;
+}
+
+/**
+ * The moves alone, with no tag pairs around them.
+ *
+ * What a study chapter stores. The position it starts from, its name and its
+ * prose are columns on the chapter's own row, so writing them into the
+ * movetext as well would give the file two places to disagree with itself -
+ * and the server's export, which builds the tag block, would emit two.
+ */
+export function toMovetext(tree: MoveTree): string {
+  return wrap(movetextTokens(tree));
+}
+
+function movetextTokens(tree: MoveTree): string[] {
+  const root = tree.nodes.get(tree.root);
+  const offset = root && root.fen !== START_FEN ? plyOffset(root.fen) : 0;
+  const first = root?.children[0];
+  const body = first === undefined ? [] : lineText(tree, first, true, offset);
+  // What was said about the starting position, before anything was played.
+  const preface = root?.comment ? [`{${root.comment}}`] : [];
+  return [...preface, ...body];
 }
 
 /**
  * One line of play, with each rival to a move written in brackets straight
  * after it - the placement the format requires and every reader assumes.
  */
-function lineText(tree: MoveTree, first: NodeId, forced: boolean): string[] {
+function lineText(tree: MoveTree, first: NodeId, forced: boolean, offset: number): string[] {
   const out: string[] = [];
   let cur: NodeId | undefined = first;
   let needNum = forced;
@@ -164,7 +231,7 @@ function lineText(tree: MoveTree, first: NodeId, forced: boolean): string[] {
   while (cur !== undefined) {
     const n = tree.nodes.get(cur);
     if (!n) break;
-    out.push(number(n.ply, needNum) + n.san + (SUFFIX_FOR_NAG[n.nag ?? 0] ?? ""));
+    out.push(number(n.ply + offset, needNum) + n.san + (SUFFIX_FOR_NAG[n.nag ?? 0] ?? ""));
     needNum = false;
 
     if (n.comment) {
@@ -177,7 +244,7 @@ function lineText(tree: MoveTree, first: NodeId, forced: boolean): string[] {
     const parent = n.parent === null ? undefined : tree.nodes.get(n.parent);
     if (parent && parent.children[0] === n.id) {
       for (const alt of parent.children.slice(1)) {
-        out.push(`(${lineText(tree, alt, true).join(" ")})`);
+        out.push(`(${lineText(tree, alt, true, offset).join(" ")})`);
         needNum = true;
       }
     }

@@ -13,94 +13,229 @@
     background-color: theme("colors.night");
   }
 
-  /* Numbers that change in place (evals, clocks, move counters) must not
-     jitter as digits swap. */
+  /* Numbers that change in place (evals, clocks, move counters, SM-2
+     intervals) must not jitter as digits swap. */
   .font-mono,
   code,
   kbd {
     font-variant-numeric: tabular-nums;
   }
 
-  /* Visible focus everywhere, without the default browser halo. */
+  /* Instrument Serif ships at one weight and a fairly loose default fit. At
+     display sizes it wants to be tightened; at small sizes it should never be
+     used at all, so only the tightening is set here. */
+  .font-display {
+    letter-spacing: -0.015em;
+  }
+
+  /* Visible focus everywhere, without the default browser halo. Brass, because
+     focus is hardware — it is not a verdict, so it must not be verdigris. */
   :focus-visible {
-    outline: 2px solid theme("colors.accent");
+    outline: 2px solid theme("colors.brass");
     outline-offset: 2px;
+    border-radius: 2px;
   }
 }
 
 @layer components {
-  /* ---------- Surfaces ---------- */
+  /* ---------- Surfaces ----------
+
+     Borders are chalk at low alpha rather than plain white: a white hairline
+     on ink navy picks up the blue and reads as a seam rather than as an edge. */
   .card {
-    @apply bg-panel/85 border border-white/[0.07] rounded-2xl shadow-edge backdrop-blur-sm;
+    @apply rounded-lg border border-[#F2F0EA]/[0.08] bg-panel/85 shadow-edge backdrop-blur-sm;
   }
   .card-tight {
-    @apply bg-panelAlt/70 border border-white/[0.06] rounded-xl;
+    @apply rounded-md border border-[#F2F0EA]/[0.06] bg-panelAlt/70;
   }
 
-  /* ---------- Controls ---------- */
+  /* A panel with a brass hairline along its top edge. Used for the few places
+     that have to announce themselves — the drill card, the review summary.
+     Sparingly: the whole point of brass is that it stays rare. */
+  .card-brass {
+    @apply relative rounded-lg border border-[#F2F0EA]/[0.08] bg-panel shadow-card;
+  }
+  .card-brass::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    border-radius: 2px 2px 0 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      theme("colors.brass") 18%,
+      theme("colors.brassLit") 50%,
+      theme("colors.brass") 82%,
+      transparent
+    );
+  }
+
+  /* ---------- Controls ----------
+
+     Flat, not carved. The old buttons sat on a hard 4px bottom edge, which is
+     the right call on timber and the wrong one on ink: this palette's depth
+     comes from the surfaces stepping in blue, and a moulded key fights it.
+     A button here is a plate of brass with a lit top edge. */
   .btn {
-    @apply px-3 py-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-sm text-ink
-           transition-all duration-150
-           hover:bg-white/[0.12] hover:border-white/20 hover:-translate-y-px
-           active:translate-y-0
-           disabled:opacity-40 disabled:pointer-events-none;
+    @apply rounded-md border border-[#F2F0EA]/[0.12] bg-[#F2F0EA]/[0.05] px-3 py-1.5 text-sm
+           text-ink transition-colors duration-150
+           hover:border-brass/40 hover:bg-[#F2F0EA]/[0.09]
+           disabled:pointer-events-none disabled:opacity-40;
   }
+
+  /* The committing action: create the repertoire, save the line, submit the
+     answer. Brass — the instrument colour, never a verdict colour. */
   .btn-primary {
-    @apply relative px-4 py-2 rounded-lg text-white font-semibold shadow-glow
-           transition-all duration-150
-           hover:-translate-y-px hover:shadow-glow-lg
-           active:translate-y-0 active:shadow-glow
-           disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none;
-    background-image: linear-gradient(135deg, #7c6bff 0%, #a855f7 55%, #6366f1 100%);
+    @apply rounded-md border border-brassLit/50 px-4 py-2 text-sm font-semibold text-[#1A1206]
+           shadow-edge transition-[background-color,border-color] duration-150
+           hover:border-brassLit disabled:pointer-events-none disabled:opacity-45;
+    background-color: theme("colors.brass");
   }
-  /* The one green "keep going" action, borrowed from every review UI. */
+  .btn-primary:hover:not(:disabled) {
+    background-color: theme("colors.brassLit");
+  }
+
+  /* The advancing action: next card, next puzzle, keep going. Quieter than
+     the commit, because advancing is the thing you do twenty times in a row
+     and it should never shout on the twentieth. */
   .btn-go {
-    @apply px-4 py-2 rounded-lg text-[#07240b] font-bold
-           transition-all duration-150
-           hover:-translate-y-px hover:brightness-110
-           active:translate-y-0
-           disabled:opacity-40 disabled:pointer-events-none;
-    background-image: linear-gradient(135deg, #8fe561 0%, #62c93f 100%);
-    box-shadow: 0 2px 12px rgba(127, 216, 88, 0.3);
+    @apply rounded-md border border-brass/45 bg-brass/[0.14] px-4 py-2 text-sm font-semibold
+           text-brassLit transition-colors duration-150
+           hover:border-brass hover:bg-brass/25
+           disabled:pointer-events-none disabled:opacity-40;
   }
+
   .input {
-    @apply w-full px-3 py-2 rounded-lg bg-panelAlt/70 border border-white/10 text-ink
-           placeholder:text-muted transition-all duration-150
-           focus:outline-none focus:border-accent/70 focus:ring-2 focus:ring-accent/25;
+    @apply w-full rounded-md border border-[#F2F0EA]/[0.12] bg-night/70 px-3 py-2
+           text-ink transition-colors duration-150 placeholder:text-faint
+           focus:border-brass/70 focus:outline-none focus:ring-2 focus:ring-brass/25;
   }
 
   /* Segmented control: nav pills, section tabs, scope switches. */
   .seg {
-    @apply inline-flex items-center gap-0.5 bg-white/[0.05] border border-white/[0.07]
-           rounded-full p-1;
+    @apply inline-flex items-center gap-0.5 rounded-md border border-[#F2F0EA]/[0.08]
+           bg-night/60 p-1;
   }
   .seg-item {
-    @apply px-3 py-1 rounded-full text-sm text-muted transition-colors
-           hover:text-ink hover:bg-white/[0.07];
+    @apply rounded px-3 py-1 text-sm text-muted transition-colors
+           hover:bg-[#F2F0EA]/[0.07] hover:text-ink;
   }
   .seg-item-on {
-    @apply bg-accent/20 text-accent font-medium hover:bg-accent/20 hover:text-accent;
+    @apply bg-brass/[0.16] font-medium text-brassLit hover:bg-brass/[0.16] hover:text-brassLit;
   }
 
   .chip {
-    @apply inline-flex items-center gap-1 text-[10px] uppercase tracking-wider
-           rounded-full px-2 py-0.5;
+    @apply inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[10px]
+           uppercase tracking-wider;
   }
 
-  /* Section heading inside a panel: small, quiet, always the same. */
+  /* Section heading inside a panel: small, quiet, always the same. Mono,
+     because these are labels on an instrument. */
   .eyebrow {
-    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-muted;
+    @apply font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-faint;
+  }
+
+  /* A hairline that carries a label, for splitting a rail into named parts.
+     The rule runs to the end of the container so the label reads as engraved
+     on it rather than floating above it. */
+  .rule-label {
+    @apply flex items-center gap-3 font-mono text-[10px] font-medium uppercase
+           tracking-[0.18em] text-faint;
+  }
+  .rule-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, theme("colors.line"), transparent);
+  }
+
+  /* Algebraic notation set as notation: a move is a token, not a word in a
+     sentence. Used in move lists, verdict lines and drill feedback. */
+  .san {
+    @apply font-mono font-medium tracking-tight text-ink;
+  }
+
+  /* ---------- Long-form prose ----------
+
+     Terms, Privacy and the credits page. The only screens in the app made of
+     sentences rather than controls, so they get the one thing the rest of the
+     UI never needs: a measure narrow enough to read down, and vertical rhythm
+     that survives twenty headings in a row. */
+  .legal {
+    @apply text-sm leading-relaxed text-ink/85;
+  }
+  .legal h2 {
+    @apply mb-2 mt-8 font-display text-2xl text-ink;
+  }
+  .legal h3 {
+    @apply mb-1.5 mt-5 font-semibold text-ink;
+  }
+  .legal p {
+    @apply mb-3;
+  }
+  .legal ul {
+    @apply mb-3 list-disc space-y-1.5 pl-5;
+  }
+  .legal li > strong {
+    @apply text-ink;
+  }
+  .legal a {
+    @apply text-brassLit underline underline-offset-2;
+  }
+  .legal code {
+    @apply rounded bg-[#F2F0EA]/[0.07] px-1 py-px font-mono text-[0.85em];
+  }
+  /* A blank the operator still has to fill in. Loud on purpose. */
+  .legal .todo {
+    @apply rounded bg-bad/20 px-1 font-mono text-[0.85em] text-bad;
+  }
+
+  /* A key you are being told to hold, inside a line of instructions. */
+  .kbd {
+    @apply rounded border border-[#F2F0EA]/20 bg-[#F2F0EA]/[0.06] px-1 py-px
+           font-mono text-[10px] text-ink;
+  }
+
+  /* ---------- Board ----------
+
+     The board is seated in a thin brass bezel rather than a timber surround.
+     Wood was doing two jobs — separating the board from the page, and saying
+     "chess" — and only the first one was needed. The ink ground separates it
+     on its own, so all that is left to do is edge it.
+
+     The 10px padding is mirrored by BOARD_FRAME in lib/boardTheme.ts, which
+     boards that are handed an exact pixel size subtract from the space they
+     measure. Change one and change the other. */
+  .board-frame {
+    @apply relative rounded-md bg-panelAlt p-2.5 shadow-board;
+  }
+  /* The bezel the board sits down into: a brass hairline plus a shadow onto
+     the outer squares, so the two planes are visibly separate.
+
+     Drawn as an overlay rather than as `overflow: hidden` on the board itself.
+     Verdict badges are centred on their square and deliberately overhang the
+     board edge on rank 1 and rank 8; clipping the board would slice them. */
+  .board-frame::after {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    z-index: 20;
+    pointer-events: none;
+    border-radius: 2px;
+    box-shadow: theme("boxShadow.frame");
   }
 }
 
-/* Ambient light. Three blooms keep the page from reading as one flat plane;
-   kept dim and behind everything, since this app is stared at for hours.
+/* Ambient light: a cold overhead wash and a brass bounce off the desk, so the
+   page is not one flat field of navy. Kept dim — this app is stared at for
+   hours.
 
-   Deliberately static. These blooms sit underneath every backdrop-blur surface
-   in the app (header, games rail, analysis panel, transport bar), and a
-   backdrop-filter has to recompute whenever the pixels behind it move. Drifting
-   them meant re-blurring most of the chrome on every frame, for the whole
-   session - an animation nobody consciously notices, paid for continuously. */
+   Deliberately static. These sit underneath every backdrop-blur surface in the
+   app (header, games rail, analysis panel, transport bar), and a backdrop-filter
+   has to recompute whenever the pixels behind it move. Drifting them meant
+   re-blurring most of the chrome on every frame, for the whole session — an
+   animation nobody consciously notices, paid for continuously. */
 body::before {
   content: "";
   position: fixed;
@@ -108,12 +243,15 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background-image:
-    radial-gradient(46% 38% at 10% 0%, rgba(124, 107, 255, 0.3), transparent 62%),
-    radial-gradient(40% 34% at 96% 8%, rgba(47, 227, 232, 0.19), transparent 60%),
-    radial-gradient(52% 40% at 60% 108%, rgba(168, 85, 247, 0.2), transparent 62%);
+    radial-gradient(44% 36% at 14% 0%, rgba(80, 122, 184, 0.2), transparent 62%),
+    radial-gradient(38% 32% at 92% 4%, rgba(63, 191, 163, 0.09), transparent 60%),
+    radial-gradient(58% 44% at 56% 106%, rgba(201, 156, 86, 0.13), transparent 66%);
 }
 
-/* A faint grid gives the dark field some texture and scale. */
+/* Laid-paper tooth on the ground. Two passes at slightly different angles and
+   periods so the grain never resolves into a visible repeat. Much finer than
+   the wood striation it replaces — this should read as the surface you write
+   on, not as a material you can name. */
 body::after {
   content: "";
   position: fixed;
@@ -122,30 +260,39 @@ body::after {
   pointer-events: none;
   opacity: 0.5;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(80% 60% at 50% 40%, #000, transparent 100%);
+    repeating-linear-gradient(
+      92deg,
+      rgba(242, 240, 234, 0.013) 0 1px,
+      transparent 1px 5px,
+      rgba(3, 8, 18, 0.026) 5px 6px,
+      transparent 6px 13px
+    ),
+    repeating-linear-gradient(
+      2deg,
+      rgba(242, 240, 234, 0.009) 0 1px,
+      transparent 1px 19px
+    );
+  mask-image: radial-gradient(85% 65% at 50% 40%, #000, transparent 100%);
 }
 
 ::selection {
-  background: rgba(139, 124, 255, 0.35);
+  background: rgba(201, 156, 86, 0.32);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2c3454 transparent;
+  scrollbar-color: #2F4A6B transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #2c3454;
+  background: #2f4a6b;
   border-radius: 4px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #3a4470;
+  background: #416389;
 }
 *::-webkit-scrollbar-track {
   background: transparent;

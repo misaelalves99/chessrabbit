@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import SiteFooter from "@/components/SiteFooter";
 import { api, ApiError, Me, TierInfo } from "@/lib/api";
 
 const unlimited = (n: number) => n === -1;
@@ -40,7 +41,7 @@ function features(t: TierInfo): string[] {
       : `Top ${t.openings_white} White + top ${t.openings_black} Black openings`
   );
   if (t.id !== "free") f.push("Stockfish 18 server-side analysis");
-  if (t.opponent_prep) f.push("🎯 Opponent prep from their real games");
+  if (t.opponent_prep) f.push("Opponent prep from their real games");
   if (t.id === "master") f.push("Leela engine — coming with GPU hosting");
   return f;
 }
@@ -73,15 +74,11 @@ export default function PricingPage() {
   }
 
   return (
-    <main className="min-h-screen p-8 max-w-5xl mx-auto">
+    <>
+      <main className="min-h-screen p-8 max-w-5xl mx-auto">
       <header className="flex items-center gap-4 mb-8">
         <Link href={me ? "/app" : "/"} className="btn">← Back</Link>
-        <h1 className="font-display text-3xl font-bold">
-          Choose your{" "}
-          <span className="bg-gradient-to-r from-accent to-accent2 bg-clip-text text-transparent">
-            plan
-          </span>
-        </h1>
+        <h1 className="font-display text-4xl leading-none">Choose your plan</h1>
       </header>
 
       {notice && (
@@ -90,6 +87,17 @@ export default function PricingPage() {
           onClick={() => setNotice(null)}
         >
           {notice} (dismiss)
+        </p>
+      )}
+
+      {/* The plans come from the server, so "no plans" is a load failure and
+          never a real state. Saying so beats leaving the page blank, which is
+          what it did before. */}
+      {tiers.length === 0 && (
+        <p className="text-sm text-muted">
+          The plans could not be loaded. Reload the page, and if they still
+          don&apos;t appear the billing service is down — your current plan is
+          unaffected.
         </p>
       )}
 
@@ -102,14 +110,14 @@ export default function PricingPage() {
               key={t.id}
               className={`rounded-xl p-6 flex flex-col gap-4 border transition-all duration-150
                 ${highlight
-                  ? "bg-panelAlt border-accent/60 shadow-glow"
-                  : "bg-panelAlt/60 border-white/5"}`}
+                  ? "bg-panelAlt border-brass/60"
+                  : "bg-panelAlt/60 border-ivory/5"}`}
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="font-display text-xl font-bold">{t.label}</h2>
+                  <h2 className="font-display text-xl">{t.label}</h2>
                   {highlight && (
-                    <span className="text-[10px] uppercase tracking-wide bg-accent/20 text-accent rounded-full px-2 py-0.5">
+                    <span className="text-[10px] uppercase tracking-wide bg-brass/20 text-brassLit rounded-full px-2 py-0.5">
                       Best value
                     </span>
                   )}
@@ -120,7 +128,7 @@ export default function PricingPage() {
                   )}
                 </div>
                 <p className="mt-2">
-                  <span className="font-display text-3xl font-bold">
+                  <span className="font-display text-3xl">
                     {t.price_monthly === 0 ? "$0" : `$${t.price_monthly}`}
                   </span>
                   <span className="text-muted text-sm"> / month</span>
@@ -130,7 +138,7 @@ export default function PricingPage() {
               <ul className="space-y-2 text-sm flex-1">
                 {features(t).map((f) => (
                   <li key={f} className="flex gap-2">
-                    <span className="text-accent">✓</span>
+                    <span className="text-brass">✓</span>
                     <span className={f.includes("coming") ? "text-muted" : ""}>{f}</span>
                   </li>
                 ))}
@@ -159,6 +167,8 @@ export default function PricingPage() {
         engine joins the Master tier once GPU hosting is live — it is listed
         as coming, never sold before it works.
       </p>
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

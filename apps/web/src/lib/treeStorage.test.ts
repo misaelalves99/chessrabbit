@@ -162,4 +162,41 @@ describe("storing", () => {
     expect(() => saveTree("game:12", tree, cursor)).not.toThrow();
     expect(loadTree("game:12", RUY)).toBeNull();
   });
+
+  /**
+   * A game you only wrote on - notes, marks, arrows drawn over the moves that
+   * were played - has no extra nodes at all, and counting nodes threw every
+   * bit of it away on reload.
+   */
+  it("keeps a game annotated but never branched", () => {
+    const tree = annotate(fromMoves(RUY), main(fromMoves(RUY), 2), {
+      comment: "the point [%cal Gf1b5]",
+    });
+    saveTree("game:13", tree, 0);
+
+    const back = loadTree("game:13", RUY);
+    expect(back).not.toBeNull();
+    expect(nodeAt(back!.tree, main(back!.tree, 2))!.comment).toBe("the point [%cal Gf1b5]");
+  });
+
+  it("keeps a mark with no words behind it", () => {
+    const tree = annotate(fromMoves(RUY), main(fromMoves(RUY), 4), { nag: 1 });
+    saveTree("game:14", tree, 0);
+    expect(nodeAt(loadTree("game:14", RUY)!.tree, main(fromMoves(RUY), 4))!.nag).toBe(1);
+  });
+
+  // Shapes on the opening position have no move to hang off, so they need
+  // their own place in the stored form or they are silently dropped.
+  it("keeps what was written about the starting position", () => {
+    const tree = annotate(fromMoves(RUY), 0, { comment: "[%csl Ge4]" });
+    saveTree("game:15", tree, 0);
+
+    const back = loadTree("game:15", RUY);
+    expect(nodeAt(back!.tree, back!.tree.root)!.comment).toBe("[%csl Ge4]");
+  });
+
+  it("still forgets a game with nothing written on it and nothing tried", () => {
+    saveTree("game:16", fromMoves(RUY), 0);
+    expect(ls.getItem("chessrabbit.tree.game:16")).toBeNull();
+  });
 });

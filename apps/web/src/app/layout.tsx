@@ -1,36 +1,54 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
+import { Archivo, IBM_Plex_Mono, Instrument_Serif } from "next/font/google";
 import "./globals.css";
 
 // Self-hosted and preloaded at build time, so first paint never waits on a
 // third-party round trip. `display: swap` means text is readable immediately
-// and the variable handoff to Tailwind keeps `font-sans` / `font-display`
-// working exactly as before.
-const inter = Inter({
+// and the variable handoff to Tailwind keeps `font-sans` / `font-display` /
+// `font-mono` working exactly as before.
+//
+// Three faces, three jobs. The pairing is the point: a high-contrast serif
+// against a technical mono, with the grotesque staying out of the way.
+
+// Body and UI. Squarer and more industrial than Inter, which is what keeps a
+// 13px label from looking like every other app's 13px label.
+const archivo = Archivo({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   display: "swap",
   variable: "--font-sans",
 });
 
-const spaceGrotesk = Space_Grotesk({
+// Display. One weight on purpose — there is no bold to reach for, so it can
+// only be used where a real display face belongs: page titles and big figures.
+const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  weight: ["400"],
   display: "swap",
   variable: "--font-display",
 });
 
+// Algebraic notation — Nf3, Bxc6, O-O — is mostly capitals and figures, and
+// this is a mono whose capitals and figures are worth looking at. Notation is
+// the app's third typeface, not its caption face.
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+  variable: "--font-mono",
+});
+
 export const metadata: Metadata = {
-  title: "ChessRabbit — Chess Database & Analysis",
+  title: "ChessRabbit — Opening Repertoire Trainer",
   description:
-    "Study chess with a full game database, server-side Stockfish analysis, and an opening explorer.",
+    "Drill your openings on a spaced-repetition schedule, find the blunders in your own games, and scout what your next opponent actually plays.",
 };
 
-// Dark UI end to end: tell the browser so form controls and the mobile
+// One ink world, end to end: tell the browser so form controls and the mobile
 // address bar match the page instead of flashing white.
 export const viewport: Viewport = {
   colorScheme: "dark",
-  themeColor: "#080B16",
+  themeColor: "#0D1728",
 };
 
 export default function RootLayout({
@@ -41,7 +59,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`h-full ${inter.variable} ${spaceGrotesk.variable}`}
+      className={`h-full ${archivo.variable} ${instrumentSerif.variable} ${plexMono.variable}`}
     >
       <body className="min-h-full text-ink antialiased font-sans">{children}</body>
     </html>

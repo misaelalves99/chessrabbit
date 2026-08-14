@@ -11,7 +11,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user, usage_today
 from app.core.tiers import is_paid
 from app.models import Game, User
-from app.schemas import MeOut
+from app.schemas import MeOut, ProfileUpdate
 
 router = APIRouter(tags=["users"])
 
@@ -35,12 +35,12 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
 
 @router.patch("/me", response_model=MeOut)
 async def update_me(
-    payload: dict,
+    payload: ProfileUpdate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if "display_name" in payload:
-        user.display_name = str(payload["display_name"])[:100]
+    if payload.display_name is not None:
+        user.display_name = payload.display_name.strip()
     await db.commit()
     await db.refresh(user)
     return await me(user, db)

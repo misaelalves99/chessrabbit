@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Annotation } from "@/lib/api";
+import { Annotation, Classification } from "@/lib/api";
 import { CLASS_META } from "@/lib/classification";
+import { LiveVerdict, formatCp } from "@/lib/liveEval";
 import { MoveTree, NodeId, nodeAt } from "@/lib/moveTree";
 import { Row, Token } from "@/lib/moveTreeRender";
 
@@ -10,6 +11,8 @@ interface Props {
   tree: MoveTree;
   rows: Row[];
   annByPly: Map<number, Annotation>;
+  /** Verdicts the engine reached live, for moves no server review covers. */
+  liveByNode: Map<NodeId, LiveVerdict>;
   cursorId: NodeId;
   onSeek: (id: NodeId) => void;
 }
@@ -31,12 +34,24 @@ function scrollingParent(el: HTMLElement | null): HTMLElement | null {
  * beneath the move it answers. The row for the current move is kept in view so
  * stepping through a long game never leaves you hunting for your place.
  *
- * Only main-line moves carry a review badge. A variation has no server verdict,
- * and borrowing the one belonging to the move it replaced would label it with
- * an opinion of a different move - the failure this whole panel is built to
- * avoid.
+ * Two kinds of verdict appear here, and they are never mixed. A filled badge is
+ * the server's, from a review of the game that was actually played, keyed by
+ * ply and checked against the move the board holds. An outlined badge is one
+ * the engine reached live, while you explored, for a move no review covers.
+ *
+ * What is still forbidden is what always was: a variation may not borrow the
+ * badge belonging to the move it replaced. That would label one move with an
+ * opinion of a different one - the failure this whole panel is built to avoid.
+ * A live verdict is about the move it sits on, or it is not shown at all.
  */
-export default function MoveList({ tree, rows, annByPly, cursorId, onSeek }: Props) {
+export default function MoveList({
+  tree,
+  rows,
+  annByPly,
+  liveByNode,
+  cursorId,
+  onSeek,
+}: Props) {
   const activeRef = useRef<HTMLButtonElement>(null);
 
   // Centre the current move inside the panel. Deliberately not
@@ -62,33 +77,49 @@ export default function MoveList({ tree, rows, annByPly, cursorId, onSeek }: Pro
     );
   }
 
+  /** How a live verdict reads on hover: the word, then the score behind it. */
+  const liveTitle = (v: LiveVerdict) =>
+    `${CLASS_META[v.cls].label} — engine, live · ${formatCp(v.cp)} at depth ${v.depth}`;
+
+  const badge = (cls: Classification, live: boolean) => (
+    <span
+      className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[8px] font-bold"
+      style={
+        live
+          ? // Outlined, so a verdict on a line you invented can never be read
+            // as part of the reviewed game. Same glyph, same colour, no fill.
+            { color: CLASS_META[cls].bg, boxShadow: `inset 0 0 0 1.5px ${CLASS_META[cls].bg}` }
+          : { background: CLASS_META[cls].bg, color: "#fff" }
+      }
+    >
+      {CLASS_META[cls].glyph}
+    </span>
+  );
+
   const cell = (id?: NodeId) => {
     const n = id == null ? undefined : nodeAt(tree, id);
     if (!n) return <span />;
-    const cls = annByPly.get(n.ply)?.classification;
+    const ann = annByPly.get(n.ply);
+    // The server's verdict wins wherever it has one. The live one only fills
+    // the gaps: an unreviewed game, or a row the alignment check dropped.
+    const live = ann?.classification ? undefined : liveByNode.get(n.id);
+    const cls = ann?.classification ?? live?.cls;
     const meta = cls ? CLASS_META[cls] : null;
     const active = cursorId === n.id;
     return (
       <button
         ref={active ? activeRef : undefined}
         onClick={() => onSeek(n.id)}
-        title={annByPly.get(n.ply)?.review ?? undefined}
+        title={ann?.review ?? (live ? liveTitle(live) : undefined)}
         aria-current={active ? "true" : undefined}
         className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left font-mono text-[13px]
                     transition-colors ${
                       active
                         ? "bg-accent/25 text-ink font-semibold ring-1 ring-accent/50"
-                        : "hover:bg-white/[0.07]"
+                        : "hover:bg-ivory/[0.07]"
                     }`}
       >
-        {meta && (
-          <span
-            className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-[8px] font-bold text-white"
-            style={{ background: meta.bg }}
-          >
-            {meta.glyph}
-          </span>
-        )}
+        {cls && badge(cls, !!live)}
         <span className={meta && !active ? meta.color : undefined}>{n.san}</span>
       </button>
     );
@@ -103,18 +134,21 @@ export default function MoveList({ tree, rows, annByPly, cursorId, onSeek }: Pro
       );
     }
     const active = cursorId === t.id;
+    const live = liveByNode.get(t.id);
     return (
       <button
         key={i}
         ref={active ? activeRef : undefined}
         onClick={() => onSeek(t.id)}
+        title={live ? liveTitle(live) : undefined}
         aria-current={active ? "true" : undefined}
-        className={`rounded px-1 py-0.5 transition-colors ${
-          active ? "bg-accent/25 font-semibold text-ink ring-1 ring-accent/50" : "hover:bg-white/[0.07]"
+        className={`inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors ${
+          active ? "bg-accent/25 font-semibold text-ink ring-1 ring-accent/50" : "hover:bg-ivory/[0.07]"
         }`}
       >
         {t.num && <span className="mr-0.5 text-muted">{t.num}</span>}
-        {t.san}
+        <span className={live && !active ? CLASS_META[live.cls].color : undefined}>{t.san}</span>
+        {live && badge(live.cls, true)}
       </button>
     );
   };

@@ -23,7 +23,7 @@ export default function ChartCard({
     <section className={`card p-4 ${className}`}>
       <header className="mb-3 flex flex-wrap items-start gap-x-3 gap-y-1.5">
         <div className="min-w-0 flex-1">
-          <h3 className="font-display text-sm font-semibold">{title}</h3>
+          <h3 className="text-sm font-semibold">{title}</h3>
           {hint && <p className="mt-0.5 text-xs leading-relaxed text-muted">{hint}</p>}
         </div>
         {actions}
@@ -57,7 +57,7 @@ export function StatTile({
 
   return (
     <div className="card-tight px-3 py-2.5">
-      <div className={`font-display text-2xl font-bold leading-none ${toneClass}`}>
+      <div className={`font-display text-2xl leading-none ${toneClass}`}>
         {value}
       </div>
       <div className="mt-1 text-[11px] uppercase tracking-wider text-muted">

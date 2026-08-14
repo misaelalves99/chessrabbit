@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.bulk import bulk_insert
 from app.core.chess_utils import extract_repertoire
 from app.core.db import get_db
 from app.core.deps import get_current_user, get_optional_user
@@ -240,14 +241,19 @@ async def train_opening(
     rep = Repertoire(user_id=user.id, name=entry["name"], color=entry["color"])
     db.add(rep)
     await db.flush()
-    for c in cards:
-        db.add(
-            TrainingCard(
-                repertoire_id=rep.id, user_id=user.id, zobrist=c["zobrist"],
-                fen=c["fen"], expected_uci=c["expected_uci"],
-                expected_san=c["expected_san"],
-            )
-        )
+    await bulk_insert(
+        db,
+        TrainingCard,
+        [
+            {
+                "repertoire_id": rep.id, "user_id": user.id,
+                "zobrist": c["zobrist"], "fen": c["fen"],
+                "expected_uci": c["expected_uci"], "expected_san": c["expected_san"],
+            }
+            for c in cards
+        ],
+        ignore_conflicts=True,
+    )
     await db.commit()
     return RepertoireOut(
         id=rep.id, name=rep.name, color=rep.color,

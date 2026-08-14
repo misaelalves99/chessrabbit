@@ -131,6 +131,78 @@ export interface ExplorerMove {
   black_pct: number;
 }
 
+// ---- Reference database search ----
+
+/** Every filter `GET /search/games` accepts. All optional, all combinable. */
+export interface GameSearchQuery {
+  white?: string;
+  black?: string;
+  eco?: string;
+  opening?: string;
+  result?: string;
+  min_elo?: number;
+  /** ISO dates (YYYY-MM-DD). A game with no date matches neither bound. */
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface SearchResults {
+  games: Game[];
+  page: number;
+  /** Whether a next page exists. There is no total — see the schema's note. */
+  has_more: boolean;
+}
+
+// ---- Studies ----
+
+/**
+ * Who may read a study. Who may *write* is a separate question, answered by
+ * the member list — a viewer is somebody you sent the link to, so there is no
+ * viewer role.
+ */
+export type StudyVisibility = "private" | "unlisted" | "public";
+
+export interface Study {
+  id: number;
+  name: string;
+  description: string | null;
+  visibility: StudyVisibility;
+  /** The share link's secret. For an unlisted study it IS the access control. */
+  slug: string;
+  chapter_count: number;
+  updated_at: string;
+  owner_id: number;
+  owner_name: string;
+  /** False when you are reading somebody else's shared study. */
+  can_edit: boolean;
+}
+
+export interface StudyChapter {
+  id: number;
+  name: string;
+  description: string | null;
+  /** Movetext with variations. No tag pairs — the row carries those. */
+  pgn: string;
+  starting_fen: string;
+  orientation: "white" | "black";
+  position: number;
+  /** Quoted back on every save; the server rejects a stale one with 409. */
+  version: number;
+}
+
+export interface StudyMember {
+  user_id: number;
+  display_name: string;
+  email: string;
+  role: string;
+}
+
+export interface StudyDetail extends Study {
+  chapters: StudyChapter[];
+  /** Empty for a reader — who else holds the keys is not their business. */
+  members: StudyMember[];
+}
+
 // ---- Insights ----
 
 export type TimeClass =
@@ -442,11 +514,18 @@ export const api = {
   logout: () => {
     const refresh =
       typeof window !== "undefined" ? localStorage.getItem("ob_refresh") : null;
+    // Both credentials are read before the local copies go, and the access
+    // token is sent explicitly. The server revokes the refresh token from the
+    // body and the access token from this header — clearing tokens first meant
+    // the request went out unauthenticated, so the access token stayed valid
+    // for the rest of its life on whatever had already copied it.
+    const access = getAccessToken();
     clearTokens();
     if (!refresh) return Promise.resolve();
     return request<void>("/auth/logout", {
       method: "POST",
       body: JSON.stringify({ refresh_token: refresh }),
+      headers: access ? { Authorization: `Bearer ${access}` } : {},
     });
   },
 
@@ -490,11 +569,25 @@ export const api = {
       { method: "POST", body: JSON.stringify({ fen, scope }), signal }
     ),
 
-  searchPosition: (fen: string) =>
-    request<Game[]>("/search/position", {
+  // ---- reference database search ----
+
+  /** "Which master games reached this exact position?" (BLUEPRINT 10.3) */
+  searchPosition: (fen: string, page = 1) =>
+    request<SearchResults>(`/search/position?page=${page}`, {
       method: "POST",
       body: JSON.stringify({ fen }),
     }),
+
+  searchGames: (query: GameSearchQuery, page = 1) => {
+    const q = new URLSearchParams({ page: String(page) });
+    // Blank boxes are absent filters, not filters matching the empty string —
+    // sending `white=` would have the server add a LIKE '%%' clause per field.
+    for (const [key, value] of Object.entries(query)) {
+      const v = typeof value === "string" ? value.trim() : value;
+      if (v !== "" && v != null) q.set(key, String(v));
+    }
+    return request<SearchResults>(`/search/games?${q.toString()}`);
+  },
 
   // ---- repertoire training ----
 
@@ -649,6 +742,107 @@ export const api = {
   /** Name-complete against the over-the-board reference database. */
   searchOtbPlayers: (q: string) =>
     request<OtbPlayer[]>(`/insights/players?q=${encodeURIComponent(q)}`),
+
+  // ---- studies ----
+  //
+  // `ref` is a study id for one of yours, or a share slug for one you were
+  // sent. The server takes either at every path, so a page opened from a link
+  // uses exactly the same calls as one opened from your own list.
+
+  listStudies: () => request<Study[]>("/studies"),
+
+  getStudy: (ref: string) => request<StudyDetail>(`/studies/${encodeURIComponent(ref)}`),
+
+  createStudy: (body: {
+    name: string;
+    description?: string;
+    visibility?: StudyVisibility;
+    from_game_id?: number;
+    pgn?: string;
+  }) => request<StudyDetail>("/studies", { method: "POST", body: JSON.stringify(body) }),
+
+  updateStudy: (
+    ref: string,
+    body: { name?: string; description?: string; visibility?: StudyVisibility },
+  ) =>
+    request<Study>(`/studies/${encodeURIComponent(ref)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  deleteStudy: (ref: string) =>
+    request<void>(`/studies/${encodeURIComponent(ref)}`, { method: "DELETE" }),
+
+  /** Mint a new slug, breaking every link already handed out. */
+  reshareStudy: (ref: string) =>
+    request<Study>(`/studies/${encodeURIComponent(ref)}/reshare`, { method: "POST" }),
+
+  createChapter: (
+    ref: string,
+    body: {
+      name: string;
+      description?: string;
+      pgn?: string;
+      starting_fen?: string;
+      orientation?: "white" | "black";
+      from_game_id?: number;
+    },
+  ) =>
+    request<StudyChapter>(`/studies/${encodeURIComponent(ref)}/chapters`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * Save a chapter.
+   *
+   * A body carrying `pgn` must carry the `version` it was read at. The server
+   * refuses a stale one with 409 `stale_chapter` rather than overwriting
+   * whatever somebody else saved in the meantime — a chapter is written whole,
+   * so a stale save does not merge badly, it merges not at all.
+   */
+  updateChapter: (
+    ref: string,
+    chapterId: number,
+    body: {
+      name?: string;
+      description?: string;
+      pgn?: string;
+      orientation?: "white" | "black";
+      version?: number;
+    },
+  ) =>
+    request<StudyChapter>(
+      `/studies/${encodeURIComponent(ref)}/chapters/${chapterId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+
+  deleteChapter: (ref: string, chapterId: number) =>
+    request<void>(`/studies/${encodeURIComponent(ref)}/chapters/${chapterId}`, {
+      method: "DELETE",
+    }),
+
+  reorderChapters: (ref: string, chapterIds: number[]) =>
+    request<void>(`/studies/${encodeURIComponent(ref)}/chapters/order`, {
+      method: "POST",
+      body: JSON.stringify({ chapter_ids: chapterIds }),
+    }),
+
+  addStudyMember: (ref: string, email: string) =>
+    request<StudyMember[]>(`/studies/${encodeURIComponent(ref)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  removeStudyMember: (ref: string, userId: number) =>
+    request<StudyMember[]>(`/studies/${encodeURIComponent(ref)}/members/${userId}`, {
+      method: "DELETE",
+    }),
+
+  studyPgnUrl: (ref: string, chapterId?: number) =>
+    `${API_URL}/studies/${encodeURIComponent(ref)}/pgn${
+      chapterId != null ? `?chapter=${chapterId}` : ""
+    }`,
 };
 
 export { ApiError, API_URL };

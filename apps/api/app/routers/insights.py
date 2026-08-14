@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user, require_master
+from app.core.http_cache import cached_json, etag_response
+from app.core.ratelimit import user_rate_limit
 from app.core.redis_client import get_redis
 from app.models import User
 from app.services.importers import PlatformError, fetch_games
@@ -27,10 +30,14 @@ RANGES = {"30d": 30, "90d": 90, "1y": 365}
 
 SOURCES = ("lichess", "chesscom", "otb")
 
+_PLATFORM_NAME = re.compile(r"[\w.-]{1,60}")
+
 # Online games are fetched from a rate-limited third party, so the same lookup
 # must not hit them twice in a row. OTB is a static dump and can sit longer.
 PUBLIC_TTL = 1800
 OTB_TTL = 86400
+# The name picker's index only changes when a reference dump is loaded.
+OTB_NAMES_TTL = 86400
 
 # Bounded so one lookup cannot stall on a 20k-game account.
 MAX_ONLINE_GAMES = 400
@@ -84,20 +91,35 @@ async def get_insights(
 
 @router.get("/insights/players")
 async def search_otb_players(
+    request: Request,
     q: str = Query(min_length=2, max_length=60),
     _: User = Depends(require_master),
     db: AsyncSession = Depends(get_db),
-) -> list[dict]:
+):
     """
     Name-complete against the over-the-board reference database.
 
     Reference PGNs spell names "Lastname, Firstname", which nobody types
     correctly first go - so the lookup itself is a picker, not free text.
+
+    Two scans of `games` with a leading-wildcard LIKE, per keystroke past the
+    client's debounce, for an answer that is the same for every user and only
+    changes when a new dump is loaded. Cached on the normalised query.
     """
-    return await otb_name_matches(db, q)
+    needle = q.strip().lower()
+
+    payload = await cached_json(
+        f"otb:names:{needle}",
+        OTB_NAMES_TTL,
+        lambda: otb_name_matches(db, needle),
+    )
+    return etag_response(request, payload, max_age=600)
 
 
-@router.get("/insights/player")
+@router.get(
+    "/insights/player",
+    dependencies=[user_rate_limit("player_insights", 20, 60)],
+)
 async def get_player_insights(
     source: str = Query(description="lichess | chesscom | otb"),
     username: str = Query(min_length=1, max_length=100),
@@ -127,6 +149,16 @@ async def get_player_insights(
         time_class=time_class, color=color, since=since, tz_offset=tz_offset
     )
     name = username.strip()
+
+    # OTB names are free text ("Carlsen, Magnus"), but an online name goes into
+    # a lichess.org/chess.com URL path, where a "/" would make it a different
+    # endpoint. Constrain exactly the case that leaves the process.
+    if source != "otb" and not _PLATFORM_NAME.fullmatch(name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "bad_username",
+                    "message": "Usernames may contain letters, digits, '_', '.' and '-' only"},
+        )
 
     redis = get_redis()
     cache_key = (

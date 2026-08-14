@@ -45,6 +45,72 @@ is not meant to face the internet directly.
 Once a CDN serves the bundle, the `web` service can be deleted from the
 compose file entirely.
 
+## Security headers
+
+`serve-static.mjs` sets CSP, `X-Content-Type-Options`, `Referrer-Policy`,
+`X-Frame-Options` and `Permissions-Policy` on every response, and the API sets
+its own (stricter) set in `apps/api/app/main.py`.
+
+The CSP's `connect-src` is built from `NEXT_PUBLIC_API_URL` / `NEXT_PUBLIC_WS_URL`
+**at container start**, so a deployment pointed at a different API automatically
+gets a policy that allows it. Serving `out/` from a CDN instead means the CDN
+must send these headers — none of them survive a plain file upload. Set
+`ENABLE_HSTS=true` only once TLS actually terminates in front of the app;
+pinning `https` on a plain-http host makes it unreachable in that browser.
+
+## Nightly jobs
+
+Two maintenance tasks run inside the `api` container. Neither is optional at
+any real volume — `analysis_cache` in particular grows without bound.
+
+```cron
+0  5 * * *  cd /srv/chessrabbit && docker compose exec -T api python -m app.services.sync_all
+30 4 * * *  cd /srv/chessrabbit && docker compose exec -T api python -m app.services.maintenance
+```
+
+`maintenance` evicts aged and surplus engine-cache rows, drops auth tokens that can
+no longer authenticate anything, forgets finished job payloads, and trims the Redis
+presence set. Retention is tuned with `ANALYSIS_CACHE_TTL_DAYS`,
+`ANALYSIS_CACHE_MAX_ROWS`, `JOB_RETENTION_DAYS` and `REVOKED_TOKEN_GRACE_DAYS`. It
+is safe to run repeatedly and safe to interrupt: every step is chunked and
+transactional.
+
+## Database migrations
+
+`db/migrations/*.sql` run automatically in filename order on a **fresh** Postgres
+volume only. An existing database needs them applied by hand:
+
+```bash
+docker compose exec -T postgres psql -U chessrabbit -v ON_ERROR_STOP=1 \
+  < db/migrations/012_hardening.sql
+docker compose exec -T postgres psql -U chessrabbit -v ON_ERROR_STOP=1 \
+  < db/migrations/013_admin_analytics.sql
+```
+
+`012` needs the `pg_trgm` extension, which requires a superuser the first time.
+
+`013` adds the admin dashboard's tables. Three of them record history nothing was
+writing before, so **every series on the dashboard starts the day this migration
+is applied** — it cannot be backfilled. Apply it before you care about the
+numbers, not when you first want to read them.
+
+## Admin access
+
+The admin dashboard lives at `/admin` and has its own login, separate from the
+player app's. An ordinary signed-in session — even on an account with `is_admin`
+— cannot reach any `/admin` route: the API issues a different token type for
+`POST /admin/auth/login` and refuses player tokens everywhere below `/admin`.
+
+```bash
+python pipeline/make_admin.py you@example.com   # grant the flag
+```
+
+Admin sessions last `ADMIN_TOKEN_TTL_MIN` (default 60) and **cannot be
+refreshed**. There is no revocation list, so that expiry is the only bound on a
+leaked admin token — shorten it rather than lengthen it. Sign-in attempts are
+rate limited to 5 per 15 minutes per IP and every one of them, successful or
+not, lands in `admin_audit` along with every admin action.
+
 ## Why this is worth doing
 
 It removes a Node process (and its memory) from the box at launch, and the

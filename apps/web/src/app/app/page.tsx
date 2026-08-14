@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import AnalysisBoard from "@/components/AnalysisBoard";
+import { GamePlayers } from "@/components/PlayerPlate";
 import MoreMenu from "@/components/MoreMenu";
 import SettingsModal from "@/components/SettingsModal";
 import { clampToPlan } from "@/lib/settings";
@@ -38,19 +39,23 @@ const MOBILE_NAV = [
   { href: "/prep", label: "Opponent prep" },
 ];
 
-/** Colour a result the way a scoreboard would. */
+/** Colour a result the way a scoreboard would: the winning side's own piece. */
 function resultTone(result: string): string {
-  if (result === "1-0") return "bg-white/90 text-[#0B1020]";
-  if (result === "0-1") return "bg-[#0B1020] text-ink ring-1 ring-white/25";
-  return "bg-white/10 text-muted";
+  if (result === "1-0") return "bg-ivory text-ebony";
+  if (result === "0-1") return "bg-ebony text-ink ring-1 ring-ivory/25";
+  return "bg-ivory/10 text-muted";
 }
 
-export default function AppPage() {
+function AppWorkspace() {
   const router = useRouter();
+  const gameParam = useSearchParams().get("game");
   const [me, setMe] = useState<Me | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [activePgn, setActivePgn] = useState<string | undefined>();
   const [activeLabel, setActiveLabel] = useState<string | undefined>();
+  // Names for the plates above and below the board. The movetext the board
+  // parses carries no tag pairs, so who played it has to travel separately.
+  const [activePlayers, setActivePlayers] = useState<GamePlayers | undefined>();
   const [activeId, setActiveId] = useState<number | undefined>();
   const [activeAnnotations, setActiveAnnotations] = useState<Annotation[]>([]);
   // The server's own ply count, so the board can tell when its parse of the
@@ -121,21 +126,44 @@ export default function AppPage() {
     }
   }
 
-  async function openGame(g: Game) {
+  /**
+   * Put a game on the board, given only its id.
+   *
+   * Everything the plates and the label need is on the detail response, so a
+   * game can be opened without holding the list row it came from — which is
+   * what lets a reference game arrive here from search as `?game=123`, and
+   * what lets a link to one be shared at all.
+   */
+  const openGameById = useCallback(async (id: number) => {
     try {
-      const detail = await api.getGame(g.id);
-      setActivePgn(detail.movetext);
-      setActiveId(g.id);
-      setActiveAnnotations(detail.annotations);
-      setActivePlies(detail.ply_count);
+      const g = await api.getGame(id);
+      setActivePgn(g.movetext);
+      setActiveId(id);
+      setActiveAnnotations(g.annotations);
+      setActivePlies(g.ply_count);
       setActiveLabel(
         `${g.white} vs ${g.black} · ${g.result}${g.event ? ` · ${g.event}` : ""}`
       );
+      setActivePlayers({
+        white: g.white,
+        black: g.black,
+        whiteElo: g.white_elo,
+        blackElo: g.black_elo,
+        result: g.result,
+      });
       setDrawerOpen(false);
     } catch {
       setNotice("Could not load that game");
     }
-  }
+  }, []);
+
+  const openGame = (g: Game) => openGameById(g.id);
+
+  // Arriving from reference search, or from a shared link to a game.
+  useEffect(() => {
+    const id = Number(gameParam);
+    if (gameParam && Number.isSafeInteger(id) && id > 0) openGameById(id);
+  }, [gameParam, openGameById]);
 
   async function doImport() {
     try {
@@ -192,12 +220,14 @@ export default function AppPage() {
   }
 
   async function doDisconnect(platform: "lichess" | "chesscom") {
+    const before = accounts;
+    setAccounts((a) => a.filter((x) => x.platform !== platform));
+    setNotice(`Disconnected ${platform}. Imported games were kept.`);
     try {
       await api.disconnectAccount(platform);
-      setAccounts((a) => a.filter((x) => x.platform !== platform));
-      setNotice(`Disconnected ${platform}. Imported games were kept.`);
     } catch {
-      setNotice("Could not disconnect");
+      setAccounts(before);
+      setNotice(`Could not disconnect ${platform} — it is still connected.`);
     }
   }
 
@@ -220,7 +250,7 @@ export default function AppPage() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-2 px-3 py-2.5">
         <span className="eyebrow">My games</span>
-        <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 font-mono text-[10px] text-muted">
+        <span className="rounded-full bg-ivory/[0.07] px-1.5 py-0.5 font-mono text-[10px] text-muted">
           {games.length}
         </span>
         <button
@@ -248,7 +278,7 @@ export default function AppPage() {
                   className={`w-full rounded-lg p-2 text-left transition-colors ${
                     active
                       ? "bg-accent/15 ring-1 ring-accent/40"
-                      : "hover:bg-white/[0.06]"
+                      : "hover:bg-ivory/[0.06]"
                   }`}
                 >
                   <div className="flex items-center gap-1.5">
@@ -265,7 +295,7 @@ export default function AppPage() {
                   </div>
                   <div className="mt-0.5 flex gap-1.5 text-[10px] text-muted">
                     {g.eco && (
-                      <span className="rounded bg-white/[0.07] px-1">{g.eco}</span>
+                      <span className="rounded bg-ivory/[0.07] px-1">{g.eco}</span>
                     )}
                     {g.opening && <span className="truncate">{g.opening}</span>}
                     {!g.opening && g.played_on && <span>{g.played_on}</span>}
@@ -282,7 +312,12 @@ export default function AppPage() {
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh lg:overflow-hidden">
       {/* ---------- Top bar ---------- */}
-      <header className="z-40 flex h-14 shrink-0 items-center gap-3 border-b border-white/[0.07] bg-panel/70 px-3 backdrop-blur-xl">
+      {/* The top bar is the one piece of chrome on every screen, so it carries
+          the grain: it reads as the edge of the table the board sits on. */}
+      <header
+        className="z-40 flex h-14 shrink-0 items-center gap-3 border-b border-[#2F4A6B]
+                   bg-panel/80 px-3 shadow-[0_2px_10px_rgba(12,8,5,0.45)] backdrop-blur-xl"
+      >
         <button
           className="btn px-2 lg:hidden"
           onClick={() => setDrawerOpen((s) => !s)}
@@ -299,16 +334,11 @@ export default function AppPage() {
           {railOpen ? "⟨" : "⟩"}
         </button>
 
-        <Link href="/app" className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent2 text-base shadow-glow">
-            🐰
-          </span>
-          <span className="font-display text-lg font-bold leading-none">
-            Chess
-            <span className="bg-gradient-to-r from-accent to-accent2 bg-clip-text text-transparent">
-              Rabbit
-            </span>
-          </span>
+        {/* The wordmark is set, not built: no badge, no gradient. The display
+            serif is doing the identifying, which is what a display serif is
+            for. */}
+        <Link href="/app" className="font-display text-lg leading-none text-ink">
+          ChessRabbit
         </Link>
 
         {/* Primary nav: one segmented pill group, no icon soup */}
@@ -330,7 +360,7 @@ export default function AppPage() {
             onClick={() => setSettingsOpen(true)}
             title="Analysis settings"
             aria-label="Analysis settings"
-            className="rounded-lg px-2 py-1.5 text-lg leading-none text-muted transition-colors hover:bg-white/[0.07] hover:text-ink"
+            className="rounded-lg px-2 py-1.5 text-lg leading-none text-muted transition-colors hover:bg-ivory/[0.07] hover:text-ink"
           >
             ⚙
           </button>
@@ -339,13 +369,15 @@ export default function AppPage() {
               {me.analyses_today}/{me.daily_limit} today
             </span>
           )}
+          {/* Tiers step in brass, not from brass to verdigris: a plan is not a
+              verdict, and verdigris only ever means "you played it right". */}
           <span
             className={`chip ${
               me.plan === "master"
-                ? "bg-gold/15 text-gold"
+                ? "border border-brass/50 bg-brass/20 text-brassLit"
                 : me.plan === "pro"
-                  ? "bg-accent/20 text-accent"
-                  : "bg-white/10 text-muted"
+                  ? "bg-brass/12 text-brass"
+                  : "bg-ivory/10 text-muted"
             }`}
           >
             {me.plan}
@@ -353,8 +385,9 @@ export default function AppPage() {
           <div className="relative">
             <button
               onClick={() => setMenuOpen((o) => !o)}
-              className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-accent to-accent2
-                         text-sm font-bold text-[#0B1020] transition-shadow hover:shadow-glow"
+              className="grid h-8 w-8 place-items-center rounded-full border border-brass/50
+                         bg-brass/15 font-mono text-sm text-brassLit transition-colors
+                         hover:border-brass hover:bg-brass/25"
               title={me.display_name || me.email}
               aria-label="Account menu"
             >
@@ -364,7 +397,7 @@ export default function AppPage() {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
                 <div className="card absolute right-0 top-full z-50 mt-2 w-60 p-1.5 shadow-card">
-                  <div className="mb-1 border-b border-white/[0.06] px-3 py-2">
+                  <div className="mb-1 border-b border-ivory/[0.06] px-3 py-2">
                     <p className="truncate text-sm font-medium">
                       {me.display_name || me.email}
                     </p>
@@ -376,49 +409,49 @@ export default function AppPage() {
                   </div>
                   {/* On a phone there is no room for the nav pills or the
                       More menu, so every destination appears here instead. */}
-                  <div className="mb-1 border-b border-white/[0.06] pb-1 md:hidden">
+                  <div className="mb-1 border-b border-ivory/[0.06] pb-1 md:hidden">
                     {MOBILE_NAV.map((n) => (
                       <Link
                         key={n.href}
                         href={n.href}
-                        className="block rounded-lg px-3 py-1.5 text-sm text-ink/90 hover:bg-white/[0.06]"
+                        className="block rounded-lg px-3 py-1.5 text-sm text-ink/90 hover:bg-ivory/[0.06]"
                       >
                         {n.label}
                       </Link>
                     ))}
                   </div>
                   <button
-                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-white/[0.06]"
+                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-ivory/[0.06]"
                     onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}
                   >
                     Analysis settings
                   </button>
                   <button
-                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-white/[0.06]"
+                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-ivory/[0.06]"
                     onClick={() => { setMenuOpen(false); setImportOpen(true); }}
                   >
                     Import PGN
                   </button>
                   <button
-                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-white/[0.06]"
+                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-ivory/[0.06]"
                     onClick={() => { setMenuOpen(false); openAccounts(); }}
                   >
                     Connected accounts
                   </button>
                   <button
-                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-white/[0.06]"
+                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-ivory/[0.06]"
                     onClick={() => { setMenuOpen(false); billingAction(); }}
                   >
                     {me.plan === "free" ? "★ Upgrade plan" : "Manage billing"}
                   </button>
                   <Link
                     href="/pricing"
-                    className="block rounded-lg px-3 py-1.5 text-sm text-ink/90 hover:bg-white/[0.06]"
+                    className="block rounded-lg px-3 py-1.5 text-sm text-ink/90 hover:bg-ivory/[0.06]"
                   >
                     Plans and pricing
                   </Link>
                   <button
-                    className="mt-1 w-full rounded-lg border-t border-white/[0.06] px-3 py-1.5 pt-2 text-left text-sm text-bad hover:bg-bad/10"
+                    className="mt-1 w-full rounded-lg border-t border-ivory/[0.06] px-3 py-1.5 pt-2 text-left text-sm text-bad hover:bg-bad/10"
                     onClick={signOut}
                   >
                     Sign out
@@ -443,7 +476,7 @@ export default function AppPage() {
       <div className="flex flex-1 lg:min-h-0">
         {/* Games rail - static on desktop, drawer on mobile */}
         <aside
-          className={`hidden w-[264px] shrink-0 border-r border-white/[0.07] bg-panel/40
+          className={`hidden w-[264px] shrink-0 border-r border-ivory/[0.07] bg-panel/40
                       backdrop-blur-xl lg:block ${railOpen ? "" : "lg:hidden"}`}
         >
           {gamesRail}
@@ -455,7 +488,7 @@ export default function AppPage() {
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setDrawerOpen(false)}
             />
-            <aside className="absolute inset-y-0 left-0 w-[280px] animate-rise border-r border-white/10 bg-panel shadow-card">
+            <aside className="absolute inset-y-0 left-0 w-[280px] animate-rise border-r border-ivory/10 bg-panel shadow-card">
               {gamesRail}
             </aside>
           </div>
@@ -468,6 +501,7 @@ export default function AppPage() {
             gameId={activeId}
             initialAnnotations={activeAnnotations}
             expectedPlies={activePlies}
+            players={activePlayers}
           />
         </main>
       </div>
@@ -486,7 +520,7 @@ export default function AppPage() {
             className="card w-full max-w-lg space-y-4 p-4 shadow-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="font-display font-semibold">Connected accounts</h2>
+            <h2 className="font-semibold">Connected accounts</h2>
             <p className="text-xs text-muted">
               Link your Lichess or Chess.com username and your games import
               automatically — newest first, synced nightly.
@@ -580,7 +614,7 @@ export default function AppPage() {
             className="card w-full max-w-lg space-y-3 p-4 shadow-card"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="font-display font-semibold">Import PGN</h2>
+            <h2 className="font-semibold">Import PGN</h2>
             <textarea
               className="input h-48 font-mono text-xs"
               placeholder={'[Event "..."]\n\n1. e4 e5 ...'}
@@ -603,5 +637,16 @@ export default function AppPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AppPage() {
+  // The workspace reads `?game=` (a link from reference search, or a shared
+  // link to one game), and useSearchParams needs a boundary in an exported
+  // app or the build refuses the page.
+  return (
+    <Suspense fallback={<p className="p-8 text-sm text-muted">Loading…</p>}>
+      <AppWorkspace />
+    </Suspense>
   );
 }
