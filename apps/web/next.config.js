@@ -17,8 +17,7 @@ const nextConfig = {
   // /app.html and deep links 404 on most CDNs.
   trailingSlash: true,
 
-  // No image optimizer exists in a static export, and there is nothing to
-  // optimize - the UI ships zero raster assets.
+  // Static exports serve local assets directly, including the donation QR code.
   images: { unoptimized: true },
 };
 module.exports = nextConfig;

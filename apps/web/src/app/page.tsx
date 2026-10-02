@@ -1,6 +1,7 @@
 import Link from "next/link";
 import SiteFooter from "@/components/SiteFooter";
 import RecallRule from "@/components/RecallRule";
+import DonateSection from "@/components/DonateSection";
 
 /**
  * The landing page.
@@ -11,7 +12,7 @@ import RecallRule from "@/components/RecallRule";
  * a position — and proves it with the same Recall Rule that runs on /train.
  *
  * Everything here is static: no engine, no client JavaScript beyond the rule's
- * one animation frame, no images.
+ * one animation frame. The donation QR code is served from the local bundle.
  */
 
 /**
@@ -224,6 +225,7 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+        <DonateSection />
       </main>
       <SiteFooter />
     </>

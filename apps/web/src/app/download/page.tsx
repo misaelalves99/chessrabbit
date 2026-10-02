@@ -1,5 +1,6 @@
 import Link from "next/link";
 import SiteFooter from "@/components/SiteFooter";
+import DonateSection from "@/components/DonateSection";
 
 const SOURCE = "https://github.com/shivamjg101/chessrabbit/tree/codex/open-source-local-engines";
 
@@ -20,6 +21,7 @@ export default function DownloadPage() {
       <a className="mt-3 block text-sm text-accent underline" href="https://github.com/shivamjg101/chessrabbit/blob/codex/open-source-local-engines/docs/LOCAL_SETUP.md">Read the local setup and engine guide</a>
     </section>
     <p className="mt-6 text-xs text-muted">GPL-3.0. No subscription or license key. The initial build needs internet access; local PGN analysis works offline after installation. Online imports and live opening statistics require a connection.</p>
+    <div className="mt-8"><DonateSection /></div>
     <SiteFooter />
   </div>;
 }

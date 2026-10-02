@@ -12,6 +12,9 @@ export default function SiteFooter() {
           <Link href="/download" className="hover:text-ink hover:underline">
             Download
           </Link>
+          <Link href="/donate" className="hover:text-ink hover:underline">
+            Donate
+          </Link>
           <Link href="/terms" className="hover:text-ink hover:underline">
             Terms
           </Link>

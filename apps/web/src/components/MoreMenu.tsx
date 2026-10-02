@@ -66,12 +66,17 @@ const GROUPS: {
     ],
   },
   {
-    heading: "Account",
+    heading: "Project",
     items: [
       {
         href: "/download",
         label: "Download and setup",
-        blurb: "Compare what each tier unlocks",
+        blurb: "Run ChessRabbit on your own computer",
+      },
+      {
+        href: "/donate",
+        label: "Donate",
+        blurb: "Support free, open-source development",
       },
     ],
   },
