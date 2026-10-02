@@ -210,8 +210,8 @@ export default function AnalysisBoard({
   const explorerAbort = useRef<AbortController | null>(null);
 
   const engine = useEngine();
-  const { evalAt, record: recordEval } = usePositionEvals();
   const settings = useSettings();
+  const { evalAt, record: recordEval } = usePositionEvals(settings.engine);
   const skin = useBoardTheme();
   const autoAnalyse = settings.autoAnalyse;
 
@@ -265,7 +265,7 @@ export default function AnalysisBoard({
     setReviewing(true);
     setReviewNotice(null);
     try {
-      const { job_id } = await api.analyseGame(gameId);
+      const { job_id } = await api.analyseGame(gameId, settings.engine, settings.depth);
       pollRef.current = setInterval(async () => {
         try {
           const job = await api.getJob(job_id);
@@ -283,12 +283,10 @@ export default function AnalysisBoard({
         }
       }, 2000);
     } catch (err) {
-      if (err instanceof ApiError && err.code === "upgrade_required") {
-        setReviewNotice(err.message);
-      }
+      setReviewNotice(err instanceof ApiError ? err.message : "Review could not start");
       setReviewing(false);
     }
-  }, [gameId, reviewing]);
+  }, [gameId, reviewing, settings.engine, settings.depth]);
 
 
   /**
@@ -352,8 +350,8 @@ export default function AnalysisBoard({
    * position would score every move with its predecessor's evaluation.
    */
   useEffect(() => {
-    if (engine.fen) recordEval(engine.fen, engine.lines[0]);
-  }, [engine.fen, engine.lines, recordEval]);
+    if (engine.fen && engine.engineId === settings.engine) recordEval(engine.fen, engine.lines[0]);
+  }, [engine.fen, engine.engineId, engine.lines, settings.engine, recordEval]);
 
   /** A verdict for every move we hold the score on both sides of. */
   const liveByNode = useMemo(() => liveVerdicts(mt.tree, evalAt), [mt.tree, evalAt]);
@@ -443,7 +441,7 @@ export default function AnalysisBoard({
 
     swept.current.add(next);
     // One line is all a score needs, and it is the cheapest thing to ask for.
-    engineAnalyse(next, settings.depth, 1);
+    engineAnalyse(next, settings.depth, 1, settings.engine);
   }, [
     sweepQueue,
     autoAnalyse,
@@ -452,6 +450,7 @@ export default function AnalysisBoard({
     fen,
     evalAt,
     settings.depth,
+    settings.engine,
     engineAnalyse,
   ]);
 
@@ -554,7 +553,7 @@ export default function AnalysisBoard({
 
     const timer = setTimeout(() => {
       if (autoAnalyse && engine.connected) {
-        engine.analyse(fen, settings.depth, settings.multipv);
+        engine.analyse(fen, settings.depth, settings.multipv, settings.engine);
       }
       if (hit) return;
 
@@ -585,7 +584,7 @@ export default function AnalysisBoard({
 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fen, engine.connected, autoAnalyse, explorerScope, settings.depth, settings.multipv]);
+  }, [fen, engine.connected, autoAnalyse, explorerScope, settings.depth, settings.multipv, settings.engine]);
 
   useEffect(() => () => explorerAbort.current?.abort(), []);
 
@@ -925,9 +924,7 @@ export default function AnalysisBoard({
           {reviewNotice && (
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-xs">
               <span>⏳ {reviewNotice}</span>
-              <Link href="/pricing" className="ml-auto shrink-0 text-gold underline">
-                See plans
-              </Link>
+
             </div>
           )}
 

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Opponent preparation (Master tier). Enter who you're facing and where they
+ * Opponent preparation. Enter who you're facing and where they
  * play; we pull their recent games, show what they actually open with, and
  * build a drillable counter-repertoire whose replies come from the master
  * reference database.
@@ -30,7 +30,6 @@ export default function PrepPage() {
     api.me().then(setMe).catch(() => router.push("/login"));
   }, [router]);
 
-  const isMaster = me?.plan === "master";
 
   async function scout() {
     setLoading(true);
@@ -64,28 +63,11 @@ export default function PrepPage() {
       <header className="flex items-center gap-3 mb-6 flex-wrap">
         <Link href="/app" className="btn">← Board</Link>
         <h1 className="font-display text-xl">🎯 Opponent Prep</h1>
-        {me && (
-          <span className="ml-auto text-xs text-muted uppercase tracking-wide">
-            {me.plan} plan
-          </span>
-        )}
+
       </header>
 
-      {me && !isMaster && (
-        <div className="bg-panelAlt/60 border border-accent/40 rounded-xl p-8 text-center space-y-3">
-          <p className="text-2xl font-display">Know them before you sit down</p>
-          <p className="text-muted max-w-lg mx-auto">
-            Scout any chess.com or Lichess player: what they open with, how they
-            score with it, and a ready-made counter-repertoire built from how
-            masters answer exactly those lines.
-          </p>
-          <Link href="/pricing" className="btn-primary inline-block">
-            Unlock with Master — $9.99/mo
-          </Link>
-        </div>
-      )}
 
-      {isMaster && (
+      {me && (
         <>
           <div className="bg-panelAlt/60 border border-ivory/5 rounded-xl p-4 flex gap-2 flex-wrap items-end">
             <div>

@@ -51,20 +51,7 @@ export interface Overview {
     new_today: number;
     new_7d: number;
     new_30d: number;
-    by_plan: Record<string, number>;
     new_series: Point[];
-  };
-  revenue: {
-    mrr_cents: number;
-    paying: number;
-    by_status: Record<string, number>;
-    conversion_pct: number;
-    churn_pct: number;
-    subscribed: number;
-    canceled: number;
-    payment_failed: number;
-    new_series: Point[];
-    canceled_series: Point[];
   };
   engagement: {
     active_series: Point[];
@@ -75,7 +62,6 @@ export interface Overview {
 
 export interface PlatformStats {
   users_total: number;
-  users_pro: number;
   users_suspended: number;
   users_new_7d: number;
   user_games: number;
@@ -94,7 +80,6 @@ export interface AdminUser {
   id: number;
   email: string;
   display_name: string;
-  plan: string;
   is_admin: boolean;
   suspended: boolean;
   email_verified: boolean;
@@ -224,10 +209,9 @@ export const adminApi = {
 
   stats: () => request<PlatformStats>("/admin/stats"),
 
-  users: (opts: { page?: number; q?: string; plan?: string; status?: string } = {}) => {
+  users: (opts: { page?: number; q?: string; status?: string } = {}) => {
     const q = new URLSearchParams({ page: String(opts.page ?? 1) });
     if (opts.q) q.set("q", opts.q);
-    if (opts.plan) q.set("plan", opts.plan);
     if (opts.status) q.set("account_status", opts.status);
     return request<UserPage>(`/admin/users?${q.toString()}`);
   },
@@ -237,12 +221,6 @@ export const adminApi = {
 
   unsuspend: (id: number) =>
     request<void>(`/admin/users/${id}/unsuspend`, { method: "POST" }),
-
-  setPlan: (id: number, plan: string, reason: string) =>
-    request<void>(`/admin/users/${id}/plan`, {
-      method: "POST",
-      body: JSON.stringify({ plan, reason }),
-    }),
 
   audit: (page = 1) => request<AuditPage>(`/admin/audit?page=${page}`),
 };

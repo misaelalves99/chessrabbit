@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAccessToken, EvalLine } from "@/lib/api";
+import { api, getAccessToken, EvalLine } from "@/lib/api";
+
+import { getSettings } from "@/lib/settings";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
 
@@ -17,6 +19,7 @@ export interface EngineState {
    * files the previous position's evaluation against the current one.
    */
   fen: string | null;
+  engineId: string | null;
   depth: number;
   thinking: boolean;
   connected: boolean;
@@ -26,8 +29,7 @@ export interface EngineState {
 /**
  * Live engine analysis over WebSocket.
  *
- * The engine runs server-side (Stockfish, GPL-3.0) - the browser only ever
- * receives evaluation numbers, never engine code. See BLUEPRINT.md Section 3.
+ * A locally configured UCI engine runs in a separate worker process.
  */
 export function useEngine() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -37,6 +39,7 @@ export function useEngine() {
   const [state, setState] = useState<EngineState>({
     lines: [],
     fen: null,
+    engineId: null,
     depth: 0,
     thinking: false,
     connected: false,
@@ -102,7 +105,7 @@ export function useEngine() {
     };
 
     ws.onclose = (event) => {
-      // 4401 (bad token) and 4429 (plan's live-board limit) are decisions, not
+      // 4401 (bad token) and 4429 (live-board resource limit) are decisions, not
       // blips: the same socket will be refused every time, so retrying every
       // 2s just hammers the API — noticeably so with a second tab open, which
       // is exactly what trips 4429. Surface the reason and stay down.
@@ -128,7 +131,8 @@ export function useEngine() {
 
   useEffect(() => {
     shouldReconnect.current = true;
-    connect();
+    if (getAccessToken()) connect();
+    else api.me().then(() => { if (shouldReconnect.current) connect(); }).catch(() => setState((s) => ({ ...s, error: "Could not open local session" })));
     return () => {
       shouldReconnect.current = false;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
@@ -136,11 +140,11 @@ export function useEngine() {
     };
   }, [connect]);
 
-  const analyse = useCallback((fen: string, depth = 22, multipv = 3) => {
+  const analyse = useCallback((fen: string, depth = 22, multipv = 3, engine = getSettings().engine) => {
     const ws = wsRef.current;
     if (ws?.readyState !== WebSocket.OPEN) return;
-    setState((s) => ({ ...s, lines: [], fen, depth: 0, thinking: true, error: null }));
-    ws.send(JSON.stringify({ op: "start", fen, depth, multipv }));
+    setState((s) => ({ ...s, lines: [], fen, engineId: engine, depth: 0, thinking: true, error: null }));
+    ws.send(JSON.stringify({ op: "start", fen, depth, multipv, engine }));
   }, []);
 
   const stop = useCallback(() => {

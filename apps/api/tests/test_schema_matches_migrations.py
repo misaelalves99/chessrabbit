@@ -20,16 +20,14 @@ from __future__ import annotations
 
 import os
 
-import pytest
-from sqlalchemy import inspect
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.core.db import Base
-
 # Importing the package is what registers every mapper on Base.metadata.
 # Without it this file would compare the migrations against an empty set and
 # cheerfully pass.
 import app.models  # noqa: F401
+import pytest
+from app.core.db import Base
+from sqlalchemy import inspect
+from sqlalchemy.ext.asyncio import create_async_engine
 
 TEST_DB = os.environ.get("CHESSRABBIT_TEST_DB")
 
@@ -40,10 +38,8 @@ pytestmark = pytest.mark.skipif(
 # Tables the migrations own that no model maps, deliberately. Listed rather
 # than ignored wholesale, so a table that appears by accident still fails.
 UNMAPPED_BY_DESIGN = {
-    # Stripe idempotency: written and read by raw SQL in routers/billing.py,
-    # because the webhook handler must record an event id before any ORM
-    # session work can be trusted to have happened.
-    "processed_webhook_events",
+    # Retained as historical records when upgrading an existing installation.
+    "subscriptions", "subscription_events", "processed_webhook_events",
 }
 
 

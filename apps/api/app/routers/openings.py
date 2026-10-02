@@ -2,27 +2,20 @@
 Curated opening repertoires, tiered.
 
 The catalog is ordered by popularity per colour (rank 1 = most played).
-Entitlements come from the plan: free = top 3 per colour, pro = top 12
-White / top 10 Black, master = everything. The lock state is computed
-server-side and enforced again on /openings/{id}/train, so the client can
-only ever start a repertoire it is entitled to.
-
-Each entry is a PGN with the opponent's main alternatives in parentheses,
-feeding the same extract_repertoire -> SM-2 pipeline as pasted PGN.
+Every catalog opening can be trained by every account.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.bulk import bulk_insert
 from app.core.chess_utils import extract_repertoire
 from app.core.db import get_db
 from app.core.deps import get_current_user, get_optional_user
-from app.core.tiers import UNLIMITED, TIERS, tier_for
 from app.models import Repertoire, TrainingCard, User
 from app.schemas import OpeningOut, RepertoireOut
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(tags=["openings"])
 
@@ -172,40 +165,19 @@ OPENINGS: list[dict] = [
 ]
 
 
-def _ranked() -> list[dict]:
-    """Attach per-colour rank and the minimum tier that unlocks each entry."""
-    out = []
-    counters = {"white": 0, "black": 0}
-    for o in OPENINGS:
-        counters[o["color"]] += 1
-        rank = counters[o["color"]]
-        min_tier = "master"
-        for tid in ("free", "pro"):
-            t = TIERS[tid]
-            allowed = t.openings_white if o["color"] == "white" else t.openings_black
-            if allowed == UNLIMITED or rank <= allowed:
-                min_tier = tid
-                break
-        out.append({**o, "rank": rank, "tier": min_tier})
-    return out
 
 
-_RANKED = _ranked()
-_TIER_ORDER = {"free": 0, "pro": 1, "master": 2}
+_RANKED = [{**o, "rank": i + 1} for i, o in enumerate(OPENINGS)]
 
 
-def _unlocked(entry: dict, plan: str) -> bool:
-    return _TIER_ORDER[entry["tier"]] <= _TIER_ORDER.get(plan, 0)
 
 
 @router.get("/openings", response_model=list[OpeningOut])
 async def list_openings(user: User | None = Depends(get_optional_user)):
-    """The catalog with lock state for the caller (logged-out = free)."""
-    plan = user.plan if user else "free"
+    """The opening catalog."""
     return [
         OpeningOut(**{k: o[k] for k in
-                      ("id", "name", "color", "eco", "description", "moves", "rank", "tier")},
-                   locked=not _unlocked(o, plan))
+                      ("id", "name", "color", "eco", "description", "moves", "rank")})
         for o in _RANKED
     ]
 
@@ -217,26 +189,13 @@ async def train_opening(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a repertoire from a catalog opening, enforcing the tier lock."""
+    """Create a repertoire from a catalog opening, available to every account."""
     entry = next((o for o in _RANKED if o["id"] == opening_id), None)
     if entry is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "not_found", "message": "Opening not found"},
         )
-    if not _unlocked(entry, user.plan):
-        tier = tier_for(user.plan)
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "upgrade_required",
-                "message": f"{entry['name']} is a {entry['tier'].capitalize()} opening. "
-                           f"Your {tier.label} plan unlocks the top "
-                           f"{tier.openings_white if entry['color'] == 'white' else tier.openings_black} "
-                           f"{entry['color']} openings.",
-            },
-        )
-
     cards = extract_repertoire(entry["moves"], entry["color"])
     rep = Repertoire(user_id=user.id, name=entry["name"], color=entry["color"])
     db.add(rep)

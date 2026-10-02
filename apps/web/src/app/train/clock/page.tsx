@@ -14,7 +14,7 @@ import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useBoardTheme } from "@/lib/boardTheme";
-import { api, ApiError, Puzzle, getAccessToken } from "@/lib/api";
+import { api, ApiError, Puzzle } from "@/lib/api";
 import { useClickToMove } from "@/hooks/useClickToMove";
 
 const ROUNDS = 10;
@@ -62,10 +62,9 @@ export default function ClockDrillPage() {
   const [results, setResults] = useState<RoundResult[]>([]);
   const [lastVerdict, setLastVerdict] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [limitMsg, setLimitMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!getAccessToken()) router.push("/login");
+    api.me().catch(() => router.push("/login"));
     return () => {
       if (clockRef.current) clearInterval(clockRef.current);
     };
@@ -184,10 +183,8 @@ export default function ClockDrillPage() {
     try {
       await api.clockStart();
     } catch (e) {
-      if (e instanceof ApiError && e.code === "upgrade_required") {
-        setLimitMsg(e.message);
-        return;
-      }
+      setError(e instanceof ApiError ? e.message : "Could not start this session");
+      return;
     }
     targetsRef.current = shuffled(TARGET_MIX);
     roundRef.current = 0;
@@ -249,12 +246,6 @@ export default function ClockDrillPage() {
         )}
       </header>
 
-      {limitMsg && (
-        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 mb-4 flex items-center gap-3 flex-wrap">
-          <span className="text-sm">⏳ {limitMsg}</span>
-          <Link href="/pricing" className="btn-primary text-sm ml-auto">See plans</Link>
-        </div>
-      )}
       {error && (
         <p className="text-sm text-bad mb-3 cursor-pointer" onClick={() => setError(null)}>
           {error} (dismiss)

@@ -1,5 +1,5 @@
 """
-Opponent preparation (Master tier).
+Opponent preparation.
 
 Point it at an opponent's chess.com or Lichess account and it fetches their
 recent games, breaks down the openings they actually play with each colour,
@@ -22,11 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.bulk import bulk_insert
 from app.core.chess_utils import zobrist_of
 from app.core.db import get_db
-from app.core.deps import require_master
+from app.core.deps import get_current_user
 from app.core.ratelimit import user_rate_limit
 from app.models import Repertoire, TrainingCard, User
 from app.schemas import (
-    PrepDossier, PrepLine, PrepRepertoireIn, PrepRequest, RepertoireOut,
+    PrepDossier,
+    PrepLine,
+    PrepRepertoireIn,
+    PrepRequest,
+    RepertoireOut,
 )
 from app.services.importers import PlatformError, fetch_games
 
@@ -113,7 +117,7 @@ def _aggregate(games: list[dict], username: str) -> tuple[dict, dict]:
 )
 async def opponent_dossier(
     payload: PrepRequest,
-    user: User = Depends(require_master),
+    user: User = Depends(get_current_user),
 ):
     """What does this opponent actually play? Their top lines with each colour."""
     games = await _fetch_opponent(payload.platform, payload.username)
@@ -147,7 +151,7 @@ async def _master_reply(db: AsyncSession, fen: str) -> str | None:
              dependencies=[user_rate_limit("prep_repertoire", 5, 60)])
 async def build_prep_repertoire(
     payload: PrepRepertoireIn,
-    user: User = Depends(require_master),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """

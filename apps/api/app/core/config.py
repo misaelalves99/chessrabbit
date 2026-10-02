@@ -1,4 +1,6 @@
+import secrets
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -66,23 +68,12 @@ class Settings(BaseSettings):
     # identifies a stolen token by finding its revoked row.
     REVOKED_TOKEN_GRACE_DAYS: int = 45
 
-    # Tier limits (BLUEPRINT Section 1.4)
-    FREE_MAX_DEPTH: int = 18
-    PRO_MAX_DEPTH: int = 32
-    FREE_DAILY_ANALYSES: int = 10
-    FREE_MAX_GAMES: int = 50
-    FREE_MAX_MULTIPV: int = 1
-    PRO_MAX_MULTIPV: int = 5
-    FREE_MAX_STUDIES: int = 3
-    # Per study, both plans. A study is a chapter list you scroll, not an
-    # archive - past this it wants to be two studies.
+    # Local resource limits, identical for every account.
+    LOCAL_MODE: bool = False
+    ENGINE_MAX_DEPTH: int = 40
+    ENGINE_MAX_MULTIPV: int = 10
+    ENGINE_MAX_LIVE_ANALYSES: int = 3
     MAX_CHAPTERS_PER_STUDY: int = 64
-
-    # Stripe
-    STRIPE_SECRET_KEY: str = ""
-    STRIPE_WEBHOOK_SECRET: str = ""
-    STRIPE_PRICE_PRO_MONTHLY: str = ""
-    STRIPE_PRICE_PRO_YEARLY: str = ""
 
     # Email
     EMAIL_API_KEY: str = ""
@@ -97,6 +88,13 @@ class Settings(BaseSettings):
         a server still signing with DEV_JWT_SECRET, so a missing JWT_SECRET in
         the environment has to be a crash, not a default.
         """
+        if self.LOCAL_MODE and self.is_production:
+            raise ValueError("LOCAL_MODE must not be enabled in production")
+        if self.LOCAL_MODE:
+            if urlparse(self.APP_BASE_URL).hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise ValueError("LOCAL_MODE requires a loopback APP_BASE_URL")
+            if self.JWT_SECRET == DEV_JWT_SECRET:
+                self.JWT_SECRET = secrets.token_urlsafe(48)
         if self.ENVIRONMENT == "production":
             problems = []
             if self.JWT_SECRET == DEV_JWT_SECRET:
@@ -134,13 +132,6 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
 
-    def max_depth_for(self, plan: str) -> int:
-        from app.core.tiers import is_paid
-        return self.PRO_MAX_DEPTH if is_paid(plan) else self.FREE_MAX_DEPTH
-
-    def max_multipv_for(self, plan: str) -> int:
-        from app.core.tiers import is_paid
-        return self.PRO_MAX_MULTIPV if is_paid(plan) else self.FREE_MAX_MULTIPV
 
 
 @lru_cache

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "stockfish",
+    "name": "Stockfish",
+    "binary": "/usr/games/stockfish"
+  },
+  {
+    "id": "lc0",
+    "name": "Leela Chess Zero (CPU)",
+    "binary": "/usr/local/bin/lc0",
+    "options": {
+      "Backend": "blas",
+      "WeightsFile": "/engines/lc0/network.pb.gz"
+    }
+  }
+]

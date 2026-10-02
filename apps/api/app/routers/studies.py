@@ -35,11 +35,18 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user, get_optional_user
 from app.core.ratelimit import user_rate_limit
-from app.core.tiers import is_paid
 from app.models import Game, Study, StudyChapter, StudyMember, User
 from app.schemas import (
-    ChapterCreate, ChapterOrder, ChapterOut, ChapterUpdate, MemberAdd,
-    StudyCreate, StudyDetail, StudyMemberOut, StudyOut, StudyUpdate,
+    ChapterCreate,
+    ChapterOrder,
+    ChapterOut,
+    ChapterUpdate,
+    MemberAdd,
+    StudyCreate,
+    StudyDetail,
+    StudyMemberOut,
+    StudyOut,
+    StudyUpdate,
 )
 
 router = APIRouter(prefix="/studies", tags=["studies"])
@@ -295,20 +302,6 @@ async def create_study(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not is_paid(user.plan):
-        owned = await db.execute(
-            select(func.count(Study.id)).where(Study.owner_id == user.id)
-        )
-        if owned.scalar_one() >= settings.FREE_MAX_STUDIES:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "code": "study_limit_reached",
-                    "message": f"Free plan keeps {settings.FREE_MAX_STUDIES} studies. "
-                               "Upgrade for unlimited.",
-                },
-            )
-
     study = Study(
         owner_id=user.id,
         name=payload.name,

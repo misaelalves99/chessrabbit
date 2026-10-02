@@ -18,7 +18,7 @@ import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { BOARD_FRAME, useBoardTheme } from "@/lib/boardTheme";
 import { useSquareSize } from "@/hooks/useSquareSize";
-import { api, getAccessToken } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useClickToMove } from "@/hooks/useClickToMove";
 import PlayerPlate, { scoreOf } from "@/components/PlayerPlate";
 
@@ -103,7 +103,7 @@ export default function PlayPage() {
   const moveListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!getAccessToken()) router.push("/login");
+    api.me().catch(() => router.push("/login"));
   }, [router]);
 
   // A hint belongs to one position - drop it as soon as the board changes.

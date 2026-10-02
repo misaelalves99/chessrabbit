@@ -5,22 +5,21 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date
 from functools import lru_cache
 
 import chess
 import chess.syzygy
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.chess_utils import validate_fen, zobrist_of
 from app.core.config import settings
 from app.core.db import get_db
-from app.core.deps import check_and_increment_usage, get_current_user, require_pro
+from app.core.deps import check_and_increment_usage, get_current_user
+from app.core.engines import resolve_engine
 from app.core.ratelimit import user_rate_limit
 from app.core.redis_client import get_redis
-from app.core.tiers import UNLIMITED, is_paid, tier_for
 from app.models import AnalysisCache, AnalysisJob, Game, User
 from app.schemas import AnalysePositionRequest, AnalysisJobOut
 
@@ -46,29 +45,6 @@ def _tablebase() -> chess.syzygy.Tablebase | None:
         return None
 
 
-async def _check_review_quota(db: AsyncSession, user: User) -> None:
-    """Free tier: a fixed number of full-game reviews per day."""
-    tier = tier_for(user.plan)
-    if tier.reviews_per_day == UNLIMITED:
-        return
-    used = (
-        await db.execute(
-            select(func.count(AnalysisJob.id)).where(
-                AnalysisJob.user_id == user.id,
-                AnalysisJob.kind == "full_game",
-                AnalysisJob.created_at >= date.today(),
-            )
-        )
-    ).scalar_one()
-    if used >= tier.reviews_per_day:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "upgrade_required",
-                "message": f"The free plan includes {tier.reviews_per_day} game reviews "
-                           "per day. Upgrade for unlimited reviews.",
-            },
-        )
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
@@ -97,23 +73,26 @@ async def analyse_position(
             detail={"code": "invalid_fen", "message": str(exc)},
         )
 
-    # Clamp request to the caller's plan rather than rejecting outright
-    depth = min(payload.depth, settings.max_depth_for(user.plan))
-    multipv = min(payload.multipv, settings.max_multipv_for(user.plan))
+    # Clamp to local resource limits shared by every account
+    engine = await resolve_engine(payload.engine)
+    depth = min(payload.depth, settings.ENGINE_MAX_DEPTH)
+    multipv = min(payload.multipv, settings.ENGINE_MAX_MULTIPV)
     zob = zobrist_of(payload.fen)
 
     cached = await db.execute(
         select(AnalysisCache).where(
-            AnalysisCache.zobrist == zob, AnalysisCache.depth >= depth
+            AnalysisCache.zobrist == zob, AnalysisCache.depth >= depth,
+            AnalysisCache.engine_version == engine["cache_key"],
+            func.jsonb_array_length(AnalysisCache.multipv) >= multipv
         ).limit(1)
     )
     hit = cached.scalar_one_or_none()
     if hit:
         job = AnalysisJob(
             user_id=user.id, kind="position",
-            params={"fen": payload.fen, "depth": depth, "multipv": multipv},
+            params={"fen": payload.fen, "depth": depth, "multipv": multipv, "engine": payload.engine},
             status="done",
-            result={"cached": True, "depth": hit.depth, "lines": hit.multipv},
+            result={"cached": True, "depth": hit.depth, "lines": hit.multipv[:multipv], "engine": payload.engine},
         )
         db.add(job)
         await db.commit()
@@ -125,27 +104,26 @@ async def analyse_position(
 
     job = AnalysisJob(
         user_id=user.id, kind="position",
-        params={"fen": payload.fen, "depth": depth, "multipv": multipv},
+        params={"fen": payload.fen, "depth": depth, "multipv": multipv, "engine": payload.engine},
         status="queued",
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    queue = "q:pro" if is_paid(user.plan) else "q:free"
+    queue = f"q:{payload.engine}:interactive"
     await get_redis().rpush(
         queue,
         json.dumps({
             "job_id": job.id, "kind": "position", "fen": payload.fen,
-            "depth": depth, "multipv": multipv, "user_id": user.id,
+            "depth": depth, "multipv": multipv, "user_id": user.id, "engine": payload.engine,
         }),
     )
 
     return AnalysisJobOut(job_id=job.id, status="queued", cached=False)
 
 
-# A full-game review holds an engine for minutes. The free tier is capped per
-# day, but a paid account had no ceiling on how fast it could fill q:batch.
+# Reviews have a request-rate limit to protect local resources.
 @router.post(
     "/game/{game_id}",
     response_model=AnalysisJobOut,
@@ -153,11 +131,14 @@ async def analyse_position(
 )
 async def analyse_full_game(
     game_id: int,
+    engine: str = Query(default="stockfish", pattern=r"^[a-z0-9_-]{1,40}$"),
+    depth: int = Query(default=18, ge=1, le=40),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue a full-game annotation pass. Free tier: limited per day."""
-    await _check_review_quota(db, user)
+    """Queue a full-game annotation pass. All accounts have access."""
+    await resolve_engine(engine)
+    depth = min(depth, settings.ENGINE_MAX_DEPTH)
     game = await db.get(Game, game_id)
     if game is None or (game.owner_id is not None and game.owner_id != user.id):
         raise HTTPException(
@@ -167,19 +148,18 @@ async def analyse_full_game(
 
     job = AnalysisJob(
         user_id=user.id, game_id=game_id, kind="full_game",
-        params={"depth": 18}, status="queued",
+        params={"depth": depth, "engine": engine}, status="queued",
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    # q:batch, not q:pro: full-game jobs hold an engine for minutes and must
-    # never sit ahead of live position analyses (see services/engine/worker.py).
+    # Batch jobs run behind interactive position requests.
     await get_redis().rpush(
-        "q:batch",
+        f"q:{engine}:batch",
         json.dumps({
             "job_id": job.id, "kind": "full_game", "game_id": game_id,
-            "user_id": user.id, "depth": 18,
+            "user_id": user.id, "depth": depth, "engine": engine,
         }),
     )
     return AnalysisJobOut(job_id=job.id, status="queued")
@@ -194,16 +174,20 @@ async def analyse_full_game(
 )
 async def analyse_collection(
     collection_id: int,
-    user: User = Depends(require_pro),
+    engine: str = Query(default="stockfish", pattern=r"^[a-z0-9_-]{1,40}$"),
+    depth: int = Query(default=18, ge=1, le=40),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue a full-game annotation pass for every game in a collection (Pro).
+    """Queue a full-game annotation pass for every game in a collection.
 
     Capped at 25 games per request to keep one user from monopolising the
     engine pool; call again for the next batch.
     """
     from app.models import Collection, CollectionGame
 
+    await resolve_engine(engine)
+    depth = min(depth, settings.ENGINE_MAX_DEPTH)
     col = await db.get(Collection, collection_id)
     if col is None or col.user_id != user.id:
         raise HTTPException(
@@ -241,7 +225,7 @@ async def analyse_collection(
         [
             {
                 "user_id": user.id, "game_id": gid, "kind": "full_game",
-                "params": {"depth": 18}, "status": "queued",
+                "params": {"depth": depth, "engine": engine}, "status": "queued",
             }
             for gid in game_ids
         ],
@@ -255,10 +239,10 @@ async def analyse_collection(
     pipe = redis.pipeline(transaction=False)
     for job_out, gid in zip(out, game_ids):
         pipe.rpush(
-            "q:batch",
+            f"q:{engine}:batch",
             json.dumps({
                 "job_id": job_out.job_id, "kind": "full_game",
-                "game_id": gid, "user_id": user.id, "depth": 18,
+                "game_id": gid, "user_id": user.id, "depth": depth, "engine": engine,
             }),
         )
     await pipe.execute()

@@ -33,9 +33,8 @@ from app.core.deps import require_admin
 from app.core.ratelimit import rate_limit
 from app.core.redact import mask_email
 from app.core.security import create_admin_token, decode_admin_token, verify_password
-from app.core.tiers import tier_for
 from app.models import AnalysisJob, Game, User
-from app.schemas import AdminLoginRequest, AdminToken, PlanOverride
+from app.schemas import AdminLoginRequest, AdminToken
 from app.services import admin_analytics
 
 log = logging.getLogger(__name__)
@@ -201,8 +200,6 @@ async def platform_stats(
             """
             SELECT
               (SELECT count(*) FROM users WHERE deleted_at IS NULL)              AS users_total,
-              (SELECT count(*) FROM users WHERE plan = 'pro'
-                 AND deleted_at IS NULL)                                          AS users_pro,
               (SELECT count(*) FROM users WHERE suspended_at IS NOT NULL)         AS users_suspended,
               (SELECT count(*) FROM users WHERE created_at >= :week)              AS users_new_7d,
               (SELECT count(*) FROM games WHERE owner_id IS NOT NULL)             AS user_games,
@@ -236,7 +233,6 @@ async def platform_stats(
 async def list_users(
     page: int = Query(default=1, ge=1),
     q: str | None = None,
-    plan: str | None = Query(default=None, pattern="^(free|pro|master)$"),
     account_status: str | None = Query(default=None, pattern="^(active|suspended|unverified)$"),
     _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -260,8 +256,6 @@ async def list_users(
     filters = [User.deleted_at.is_(None)]
     if q:
         filters.append(User.email.ilike(f"%{q}%"))
-    if plan:
-        filters.append(User.plan == plan)
     if account_status == "suspended":
         filters.append(User.suspended_at.is_not(None))
     elif account_status == "active":
@@ -298,7 +292,6 @@ async def list_users(
                 "id": u.id,
                 "email": u.email,
                 "display_name": u.display_name,
-                "plan": u.plan,
                 "is_admin": u.is_admin,
                 "suspended": u.suspended_at is not None,
                 "email_verified": u.email_verified,
@@ -357,82 +350,6 @@ async def unsuspend_user(
     await db.commit()
 
 
-@router.post("/users/{user_id}/plan", status_code=status.HTTP_204_NO_CONTENT)
-async def override_plan(
-    user_id: int,
-    payload: PlanOverride,
-    request: Request,
-    admin: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Set a user's plan by hand - comps, support fixes, refunded upgrades.
-
-    This DELIBERATELY breaches the invariant documented at the top of
-    routers/billing.py: the Stripe webhook is otherwise the only writer of
-    users.plan, which is what stops a client talking itself into a paid tier.
-    Two things keep the hole narrow:
-
-      1. An account with a live Stripe subscription is refused. Stripe is the
-         source of truth for those, and the next webhook would silently undo
-         whatever we wrote here - a change that appears to work and then
-         reverts is worse than one that is refused.
-      2. Every override requires a reason and lands in admin_audit alongside a
-         subscription_events row, so manual grants are visible in the revenue
-         numbers rather than hiding inside them.
-    """
-    target = await db.get(User, user_id)
-    if target is None:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "User not found"})
-
-    live = (
-        await db.execute(
-            text(
-                "SELECT status FROM subscriptions "
-                "WHERE user_id = :uid AND status IN ('active', 'trialing')"
-            ),
-            {"uid": user_id},
-        )
-    ).scalar_one_or_none()
-    if live:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "stripe_managed",
-                "message": "This account has a live Stripe subscription. "
-                           "Change it in Stripe - a webhook would overwrite this.",
-            },
-        )
-
-    previous = target.plan
-    if previous == payload.plan:
-        return
-
-    target.plan = payload.plan
-    await db.execute(
-        text(
-            """
-            INSERT INTO subscription_events
-              (user_id, event_type, plan, status, amount_cents)
-            VALUES (:uid, 'manual_override', :plan, 'manual', :amount)
-            """
-        ),
-        {
-            "uid": user_id, "plan": payload.plan,
-            "amount": round(tier_for(payload.plan).price_monthly * 100),
-        },
-    )
-    await _audit(
-        db, admin.id, "override_plan", target.id,
-        {"from": previous, "to": payload.plan, "reason": payload.reason,
-         "email": target.email},
-        _client_ip(request),
-    )
-    await db.commit()
-    log.info(
-        "Admin %s set user %s plan %s -> %s (%s)",
-        mask_email(admin.email), user_id, previous, payload.plan, payload.reason,
-    )
 
 
 # ------------------------------------------------------------------

@@ -15,19 +15,21 @@ updated server-side from the reported outcome.
 from __future__ import annotations
 
 import random
-from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import check_daily_session, get_current_user
+from app.core.deps import get_current_user
 from app.core.http_cache import cached_json, etag_response
-from app.core.tiers import UNLIMITED, tier_for
 from app.models import Puzzle, PuzzleAttempt, User
 from app.schemas import (
-    PuzzleAttemptIn, PuzzleAttemptResult, PuzzleOut, PuzzleStats, PuzzleTheme,
+    PuzzleAttemptIn,
+    PuzzleAttemptResult,
+    PuzzleOut,
+    PuzzleStats,
+    PuzzleTheme,
 )
 
 router = APIRouter(prefix="/puzzles", tags=["puzzles"])
@@ -144,43 +146,17 @@ async def list_themes(
     return etag_response(request, payload, max_age=600)
 
 
-async def _check_puzzle_quota(db: AsyncSession, user: User) -> None:
-    """Free tier: a fixed number of new puzzles per day."""
-    tier = tier_for(user.plan)
-    if tier.puzzles_per_day == UNLIMITED:
-        return
-    used = (
-        await db.execute(
-            select(func.count(PuzzleAttempt.id)).where(
-                PuzzleAttempt.user_id == user.id,
-                PuzzleAttempt.created_at >= date.today(),
-            )
-        )
-    ).scalar_one()
-    if used >= tier.puzzles_per_day:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "upgrade_required",
-                "message": f"The free plan includes {tier.puzzles_per_day} puzzles "
-                           "per day. Upgrade for unlimited tactics.",
-            },
-        )
 
 
 @router.post("/rush/start")
 async def start_rush(user: User = Depends(get_current_user)):
     """Gate Puzzle Rush runs per day on the free tier."""
-    tier = tier_for(user.plan)
-    await check_daily_session(user, "rush", tier.rush_per_day, "Puzzle Rush run")
     return {"ok": True}
 
 
 @router.post("/clock/start")
 async def start_clock_drill(user: User = Depends(get_current_user)):
     """Gate Time Bank drill sessions per day on the free tier."""
-    tier = tier_for(user.plan)
-    await check_daily_session(user, "clock", tier.clock_per_day, "Time Bank drill")
     return {"ok": True}
 
 
@@ -200,8 +176,6 @@ async def next_puzzle(
     The daily puzzle quota applies to practice only - rush and clock serves
     are covered by their own once-a-day session gates.
     """
-    if mode == "practice":
-        await _check_puzzle_quota(db, user)
 
     center = rating if rating is not None else user.puzzle_rating
     lo, hi = center - RATING_WINDOW, center + RATING_WINDOW

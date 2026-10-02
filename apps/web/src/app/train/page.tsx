@@ -489,32 +489,18 @@ export default function TrainPage() {
                         {list.map((o) => (
                           <li
                             key={o.id}
-                            className={`rounded p-2 ${
-                              o.locked ? "opacity-70" : "hover:bg-raise/40"
-                            }`}
+                            className="rounded p-2 hover:bg-raise/40"
                           >
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium text-ink">{o.name}</span>
                               <span className="font-mono text-[10px] text-faint">{o.eco}</span>
-                              {o.locked ? (
-                                <Link
-                                  href="/pricing"
-                                  className="ml-auto rounded border border-brass/40 px-2 py-0.5
-                                             font-mono text-[10px] uppercase tracking-wider
-                                             text-brassLit hover:bg-brass/15"
-                                  title={`Unlocks with the ${o.tier} plan`}
-                                >
-                                  {o.tier === "pro" ? "Pro" : "Master"}
-                                </Link>
-                              ) : (
-                                <button
+                              <button
                                   className="btn ml-auto px-2 py-1 text-xs"
                                   disabled={addingOpening !== null}
                                   onClick={() => trainOpening(o)}
                                 >
                                   {addingOpening === o.id ? "Adding…" : "Add"}
                                 </button>
-                              )}
                             </div>
                             <p className="mt-0.5 text-xs leading-relaxed text-muted">
                               {o.description}

@@ -6,8 +6,17 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    status,
+)
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import revocation
@@ -16,13 +25,22 @@ from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.ratelimit import rate_limit
 from app.core.security import (
-    create_access_token, decode_access_token, generate_token, hash_password,
-    hash_token, verify_password,
+    create_access_token,
+    decode_access_token,
+    generate_token,
+    hash_password,
+    hash_token,
+    verify_password,
 )
 from app.models import EmailToken, RefreshToken, User
 from app.schemas import (
-    ForgotRequest, LoginRequest, RefreshRequest, RegisterRequest,
-    ResetRequest, TokenPair, VerifyRequest,
+    ForgotRequest,
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    ResetRequest,
+    TokenPair,
+    VerifyRequest,
 )
 from app.services.mailer import send_reset_email, send_verification_email
 
@@ -60,7 +78,7 @@ async def _issue_tokens(
         token.family_id = token.id
     await db.commit()
     return TokenPair(
-        access_token=create_access_token(user.id, user.plan),
+        access_token=create_access_token(user.id),
         refresh_token=raw_refresh,
     )
 
@@ -394,3 +412,19 @@ async def resend_verification(
     )
     await db.commit()
     background.add_task(send_verification_email, user.email, raw)
+
+
+@router.post("/local-session", response_model=TokenPair)
+async def local_session(request: Request, db: AsyncSession = Depends(get_db)):
+    """Bootstrap a personal account, only from the configured local web origin."""
+    if not settings.LOCAL_MODE:
+        raise HTTPException(404, "Local mode is disabled")
+    if request.headers.get("origin") != settings.APP_BASE_URL:
+        raise HTTPException(403, "Open the app at its configured localhost address")
+    email = "local@chessrabbit.dev"
+    await db.execute(insert(User).values(email=email, password_hash=_DUMMY_HASH,
+        display_name="Local player", email_verified=True).on_conflict_do_nothing(index_elements=[User.email]))
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+    if user.deleted_at is not None or user.suspended_at is not None:
+        raise HTTPException(403, "Local account is unavailable")
+    return await _issue_tokens(db, user)

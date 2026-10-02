@@ -17,14 +17,13 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import func, insert, select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.breaker import CircuitOpen, breaker
 from app.core.bulk import bulk_insert
 from app.core.chess_utils import parse_pgn, positions_of_game
-from app.core.config import settings
 from app.models import ExternalAccount, Game, GamePosition, User
 
 log = logging.getLogger(__name__)
@@ -265,16 +264,6 @@ async def _import_entries(
     )
     seen: set[str] = {row[0] for row in result.all()}
 
-    count_res = await db.execute(
-        select(func.count(Game.id)).where(Game.owner_id == user.id)
-    )
-    from app.core.tiers import is_paid
-
-    quota: int | None = (
-        None
-        if is_paid(user.plan)
-        else max(0, settings.FREE_MAX_GAMES - count_res.scalar_one())
-    )
 
     imported = duplicates = capped = 0
     errors: list[str] = []
@@ -288,9 +277,6 @@ async def _import_entries(
     for parsed, ext_id in entries:
         if ext_id and ext_id in seen:
             duplicates += 1
-            continue
-        if quota is not None and imported >= quota:
-            capped += 1
             continue
         try:
             positions = positions_of_game(parsed["movetext"])

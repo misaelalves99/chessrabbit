@@ -122,11 +122,6 @@ export default function StudiesPage() {
       {error && (
         <div className="mb-4 rounded-lg border border-bad/30 bg-bad/10 px-3 py-2 text-sm">
           {error}
-          {error.toLowerCase().includes("upgrade") && (
-            <Link href="/pricing" className="ml-2 text-gold underline">
-              See plans
-            </Link>
-          )}
         </div>
       )}
 

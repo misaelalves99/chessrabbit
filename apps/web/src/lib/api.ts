@@ -3,6 +3,8 @@
  * Handles access-token storage and transparent refresh on 401.
  */
 
+import { getSettings } from "@/lib/settings";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export interface TokenPair {
@@ -15,7 +17,7 @@ export interface Me {
   id: number;
   email: string;
   display_name: string;
-  plan: "free" | "pro" | "master";
+  local_mode: boolean;
   email_verified: boolean;
   analyses_today: number;
   daily_limit: number | null;
@@ -328,22 +330,14 @@ export interface Opening {
   description: string;
   moves: string;
   rank: number;
-  tier: "free" | "pro" | "master";
-  locked: boolean;
 }
 
-export interface TierInfo {
-  id: "free" | "pro" | "master";
-  label: string;
-  price_monthly: number;
-  reviews_per_day: number;      // -1 = unlimited
-  puzzles_per_day: number;
-  rush_per_day: number;
-  intuition_per_day: number;
-  clock_per_day: number;
-  openings_white: number;
-  openings_black: number;
-  opponent_prep: boolean;
+export interface EngineInfo {
+  id: string;
+  name: string;
+  available: boolean;
+  version: string | null;
+  error?: string;
 }
 
 export interface IntuitionPosition {
@@ -443,7 +437,7 @@ export function clearTokens() {
   }
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+async function doRefreshAccessToken(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   const refresh = localStorage.getItem("ob_refresh");
   if (!refresh) return false;
@@ -461,11 +455,40 @@ async function refreshAccessToken(): Promise<boolean> {
   return true;
 }
 
+let refreshing: Promise<boolean> | null = null;
+let bootstrapping: Promise<boolean> | null = null;
+let localMode: boolean | undefined;
+
+async function bootstrapLocal(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  if (!bootstrapping) bootstrapping = (async () => {
+    if (localMode === undefined) {
+      const config = await fetch(`${API_URL}/app-config`);
+      if (!config.ok) return false;
+      localMode = (await config.json()).local_mode;
+    }
+    if (!localMode) return false;
+    const res = await fetch(`${API_URL}/auth/local-session`, { method: "POST" });
+    if (!res.ok) return false;
+    setTokens(await res.json());
+    return true;
+  })().finally(() => { bootstrapping = null; });
+  return bootstrapping;
+}
+
+async function refreshAccessToken(): Promise<boolean> {
+  if (!refreshing) refreshing = (async () =>
+    await doRefreshAccessToken() || await bootstrapLocal()
+  )().finally(() => { refreshing = null; });
+  return refreshing;
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
   retry = true
 ): Promise<T> {
+  if (!path.startsWith("/auth/") && !getAccessToken()) await bootstrapLocal();
   const token = getAccessToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -543,14 +566,14 @@ export const api = {
 
   deleteGame: (id: number) => request<void>(`/games/${id}`, { method: "DELETE" }),
 
-  analysePosition: (fen: string, depth = 20, multipv = 3) =>
+  analysePosition: (fen: string, depth = 20, multipv = 3, engine = getSettings().engine) =>
     request<{ job_id: number; status: string; cached: boolean; result: any }>(
       "/analysis/position",
-      { method: "POST", body: JSON.stringify({ fen, depth, multipv }) }
+      { method: "POST", body: JSON.stringify({ fen, depth, multipv, engine }) }
     ),
 
-  analyseGame: (gameId: number) =>
-    request<{ job_id: number; status: string }>(`/analysis/game/${gameId}`, {
+  analyseGame: (gameId: number, engine = getSettings().engine, depth = getSettings().depth) =>
+    request<{ job_id: number; status: string }>(`/analysis/game/${gameId}?engine=${encodeURIComponent(engine)}&depth=${depth}`, {
       method: "POST",
     }),
 
@@ -604,9 +627,9 @@ export const api = {
   trainOpening: (id: string) =>
     request<Repertoire>(`/openings/${id}/train`, { method: "POST" }),
 
-  listTiers: () => request<TierInfo[]>("/tiers"),
+  listEngines: () => request<EngineInfo[]>("/engines"),
 
-  // ---- opponent prep (master tier) ----
+  // ---- opponent prep  ----
 
   prepOpponent: (platform: "lichess" | "chesscom", username: string) =>
     request<PrepDossier>("/prep/opponent", {
@@ -701,17 +724,6 @@ export const api = {
   disconnectAccount: (platform: "lichess" | "chesscom") =>
     request<void>(`/me/accounts/${platform}`, { method: "DELETE" }),
 
-  // ---- billing ----
-
-  checkout: (interval: "monthly" | "yearly" = "monthly") =>
-    request<{ url: string }>("/billing/checkout", {
-      method: "POST",
-      body: JSON.stringify({ interval }),
-    }),
-
-  billingPortal: () =>
-    request<{ url: string }>("/billing/portal", { method: "POST" }),
-
   // ---- insights ----
 
   insights: (opts: InsightsQuery = {}) => {
@@ -725,7 +737,7 @@ export const api = {
     return request<Insights>(`/insights?${q.toString()}`);
   },
 
-  /** Insights for somebody else — Master plan only. */
+  /** Insights for somebody else. */
   playerInsights: (
     source: InsightsSource,
     username: string,

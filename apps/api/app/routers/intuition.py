@@ -23,8 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import check_daily_session, get_current_user
-from app.core.tiers import tier_for
+from app.core.deps import get_current_user
 from app.models import User
 from app.schemas import IntuitionOut
 
@@ -66,10 +65,6 @@ async def _reference_id_range(db: AsyncSession) -> tuple[int, int] | None:
 @router.post("/start")
 async def start_session(user: User = Depends(get_current_user)):
     """Gate intuition sessions per day on the free tier."""
-    tier = tier_for(user.plan)
-    await check_daily_session(
-        user, "intuition", tier.intuition_per_day, "intuition session"
-    )
     return {"ok": True}
 
 

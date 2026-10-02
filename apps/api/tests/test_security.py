@@ -7,11 +7,10 @@ not a broken page, it is an unenforced control - so each one is pinned.
 """
 
 import pytest
-from pydantic import ValidationError
-
 from app.core.config import DEV_JWT_SECRET, Settings
 from app.core.ratelimit import _client_ip
 from app.schemas import PrepRepertoireIn, PrepRequest, ProfileUpdate
+from pydantic import ValidationError
 
 # A production environment that satisfies every boot requirement. Each test
 # below takes this and breaks exactly one thing, so a new requirement shows up
@@ -185,10 +184,10 @@ def test_access_tokens_carry_a_revocable_id():
     """
     from app.core.security import create_access_token, decode_access_token
 
-    payload = decode_access_token(create_access_token(1, "free"))
+    payload = decode_access_token(create_access_token(1))
     assert payload is not None
     assert payload["jti"]
-    assert decode_access_token(create_access_token(1, "free"))["jti"] != payload["jti"]
+    assert decode_access_token(create_access_token(1))["jti"] != payload["jti"]
 
 
 def test_admin_tokens_carry_a_revocable_id():

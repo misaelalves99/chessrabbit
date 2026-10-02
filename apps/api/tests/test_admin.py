@@ -18,13 +18,13 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import jwt
 import pytest
-
 from app.core.config import Settings, settings
 from app.core.security import (
-    create_access_token, create_admin_token, decode_access_token, decode_admin_token,
+    create_access_token,
+    create_admin_token,
+    decode_access_token,
+    decode_admin_token,
 )
-from app.core.tiers import TIERS
-
 
 # ---------- token separation ----------
 #
@@ -40,7 +40,7 @@ def test_player_token_is_not_accepted_as_an_admin_token():
     The one that matters: this is what stops an XSS in the player app - which
     can read the access token out of localStorage - from reaching the dashboard.
     """
-    assert decode_admin_token(create_access_token(1, "free")) is None
+    assert decode_admin_token(create_access_token(1)) is None
 
 
 def test_admin_token_round_trips():
@@ -100,7 +100,7 @@ async def test_admin_endpoints_reject_a_valid_player_token():
     """
     from app.main import app
 
-    token = create_access_token(1, "master")
+    token = create_access_token(1)
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -124,28 +124,6 @@ async def test_admin_endpoints_reject_missing_and_malformed_credentials():
         ):
             res = await client.get("/admin/overview", headers=headers)
             assert res.status_code == 401
-
-
-# ---------- revenue arithmetic ----------
-
-def test_mrr_is_summed_from_tier_prices_in_cents():
-    """
-    MRR is money, so it is carried in integer cents end to end. The float in
-    tiers.py is the only place a fraction exists and it is rounded once, here.
-    """
-    from app.services.admin_analytics import PAYING_STATUSES
-
-    assert "active" in PAYING_STATUSES and "trialing" in PAYING_STATUSES
-    assert round(TIERS["pro"].price_monthly * 100) == 499
-    assert round(TIERS["master"].price_monthly * 100) == 999
-    assert round(TIERS["free"].price_monthly * 100) == 0
-
-
-def test_every_tier_has_a_price_mrr_can_be_computed_from():
-    """A plan added without a price would silently contribute 0 to revenue."""
-    for plan, tier in TIERS.items():
-        assert tier.price_monthly >= 0, plan
-        assert (plan == "free") == (tier.price_monthly == 0)
 
 
 # ---------- presence ----------

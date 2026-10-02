@@ -7,7 +7,7 @@ import AnalysisBoard from "@/components/AnalysisBoard";
 import { GamePlayers } from "@/components/PlayerPlate";
 import MoreMenu from "@/components/MoreMenu";
 import SettingsModal from "@/components/SettingsModal";
-import { clampToPlan } from "@/lib/settings";
+import { clampToResources } from "@/lib/settings";
 import {
   Annotation,
   api,
@@ -92,39 +92,15 @@ function AppWorkspace() {
       .me()
       .then((m) => {
         setMe(m);
-        // Saved settings default to the paid ceiling; bring them down to what
+        // Clamp saved preferences to the configured resource limits for
         // this account can actually request. Still lands before the engine is
         // asked, since AnalysisBoard only mounts once `me` is set.
-        clampToPlan(m.max_depth, m.max_multipv);
+        clampToResources(m.max_depth, m.max_multipv);
       })
       .catch(() => router.push("/login"));
 
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("upgraded")) {
-      setNotice("Welcome to Pro! Deeper analysis and unlimited games are now unlocked.");
-      window.history.replaceState({}, "", "/app");
-    } else if (params.get("canceled")) {
-      setNotice("Checkout canceled - no charge was made.");
-      window.history.replaceState({}, "", "/app");
-    }
   }, [router, loadGames]);
 
-  async function billingAction() {
-    if (me?.plan === "free") {
-      router.push("/pricing");
-      return;
-    }
-    try {
-      const { url } = await api.billingPortal();
-      window.location.href = url;
-    } catch (err) {
-      setNotice(
-        err instanceof ApiError && err.code === "billing_not_configured"
-          ? "Billing isn't configured on this server yet (see README)."
-          : "Billing request failed - try again shortly."
-      );
-    }
-  }
 
   /**
    * Put a game on the board, given only its id.
@@ -181,7 +157,7 @@ function AppWorkspace() {
     let msg = `${res.platform}: imported ${res.imported} game(s)`;
     if (res.duplicates) msg += `, ${res.duplicates} already here`;
     if (res.capped)
-      msg += ` — ${res.capped} skipped (free plan is full; upgrade for unlimited)`;
+      msg += ` — ${res.capped} skipped`;
     return msg;
   }
 
@@ -369,19 +345,7 @@ function AppWorkspace() {
               {me.analyses_today}/{me.daily_limit} today
             </span>
           )}
-          {/* Tiers step in brass, not from brass to verdigris: a plan is not a
-              verdict, and verdigris only ever means "you played it right". */}
-          <span
-            className={`chip ${
-              me.plan === "master"
-                ? "border border-brass/50 bg-brass/20 text-brassLit"
-                : me.plan === "pro"
-                  ? "bg-brass/12 text-brass"
-                  : "bg-ivory/10 text-muted"
-            }`}
-          >
-            {me.plan}
-          </span>
+          <span className="chip bg-ivory/10 text-muted">{me.local_mode ? "Local" : "Community"}</span>
           <div className="relative">
             <button
               onClick={() => setMenuOpen((o) => !o)}
@@ -438,17 +402,12 @@ function AppWorkspace() {
                   >
                     Connected accounts
                   </button>
-                  <button
-                    className="w-full rounded-lg px-3 py-1.5 text-left text-sm text-ink/90 hover:bg-ivory/[0.06]"
-                    onClick={() => { setMenuOpen(false); billingAction(); }}
-                  >
-                    {me.plan === "free" ? "★ Upgrade plan" : "Manage billing"}
-                  </button>
+
                   <Link
-                    href="/pricing"
+                    href="/download"
                     className="block rounded-lg px-3 py-1.5 text-sm text-ink/90 hover:bg-ivory/[0.06]"
                   >
-                    Plans and pricing
+                    Download and setup
                   </Link>
                   <button
                     className="mt-1 w-full rounded-lg border-t border-ivory/[0.06] px-3 py-1.5 pt-2 text-left text-sm text-bad hover:bg-bad/10"

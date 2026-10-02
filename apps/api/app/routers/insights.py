@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import get_current_user, require_master
+from app.core.deps import get_current_user
 from app.core.http_cache import cached_json, etag_response
 from app.core.ratelimit import user_rate_limit
 from app.core.redis_client import get_redis
@@ -19,7 +19,9 @@ from app.models import User
 from app.services.importers import PlatformError, fetch_games
 from app.services.insights import Filters, cached_insights
 from app.services.public_insights import (
-    build_public_insights, otb_games, otb_name_matches,
+    build_public_insights,
+    otb_games,
+    otb_name_matches,
 )
 
 log = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ async def get_insights(
 async def search_otb_players(
     request: Request,
     q: str = Query(min_length=2, max_length=60),
-    _: User = Depends(require_master),
+    _: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -127,7 +129,7 @@ async def get_player_insights(
     color: str | None = Query(default=None, pattern="^[wb]$"),
     range_: str = Query(default="all", alias="range"),
     tz_offset: int = Query(default=0, ge=-840, le=840),
-    user: User = Depends(require_master),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """

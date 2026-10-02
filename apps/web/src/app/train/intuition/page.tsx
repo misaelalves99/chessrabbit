@@ -15,7 +15,7 @@ import Link from "next/link";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useBoardTheme } from "@/lib/boardTheme";
-import { api, ApiError, IntuitionPosition, getAccessToken } from "@/lib/api";
+import { api, ApiError, IntuitionPosition } from "@/lib/api";
 import { useClickToMove } from "@/hooks/useClickToMove";
 
 const ROUNDS = 10;
@@ -46,10 +46,9 @@ export default function IntuitionPage() {
   const [feedback, setFeedback] = useState<RoundResult | null>(null);
   const [judging, setJudging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [limitMsg, setLimitMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!getAccessToken()) router.push("/login");
+    api.me().catch(() => router.push("/login"));
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
@@ -175,10 +174,8 @@ export default function IntuitionPage() {
     try {
       await api.intuitionStart();
     } catch (e) {
-      if (e instanceof ApiError && e.code === "upgrade_required") {
-        setLimitMsg(e.message);
-        return;
-      }
+      setError(e instanceof ApiError ? e.message : "Could not start this session");
+      return;
     }
     setResults([]);
     setRound(1);
@@ -217,12 +214,6 @@ export default function IntuitionPage() {
         )}
       </header>
 
-      {limitMsg && (
-        <div className="bg-gold/10 border border-gold/30 rounded-xl p-4 mb-4 flex items-center gap-3 flex-wrap">
-          <span className="text-sm">⏳ {limitMsg}</span>
-          <Link href="/pricing" className="btn-primary text-sm ml-auto">See plans</Link>
-        </div>
-      )}
       {error && (
         <p className="text-sm text-bad mb-3 cursor-pointer" onClick={() => setError(null)}>
           {error} (dismiss)

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 from app.core.config import settings
 
@@ -43,11 +43,10 @@ def hash_token(token: str) -> str:
 
 # ---------- JWT access tokens ----------
 
-def create_access_token(user_id: int, plan: str) -> str:
+def create_access_token(user_id: int) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
-        "plan": plan,
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_TTL_MIN),
         "type": "access",

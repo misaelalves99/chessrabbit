@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ApiError, Insights, InsightsRange, InsightsSource, OtbPlayer, TimeClass, api,
-  getAccessToken,
 } from "@/lib/api";
 import {
   CalendarSection, GamesSection, MovesSection, OpeningsSection,
@@ -134,9 +133,6 @@ export default function InsightsPage() {
   const [color, setColor] = useState<"all" | "w" | "b">("all");
 
   const [subject, setSubject] = useState<Subject>({ kind: "me" });
-  // Looking someone up is a Master feature; a 402 becomes an upsell rather
-  // than a red error, since it is a price tag and not a failure.
-  const [locked, setLocked] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -154,17 +150,10 @@ export default function InsightsPage() {
       .then((res) => {
         setData(res);
         setError(null);
-        setLocked(false);
-      })
+          })
       .catch((err) => {
         setData(null);
-        if (err instanceof ApiError && err.code === "upgrade_required") {
-          setLocked(true);
-          setError(null);
-          return;
-        }
-        setLocked(false);
-        setError(
+            setError(
           err instanceof ApiError
             ? err.message
             : subject.kind === "me"
@@ -176,11 +165,7 @@ export default function InsightsPage() {
   }, [timeClass, range, color, subject]);
 
   useEffect(() => {
-    if (!getAccessToken()) {
-      router.push("/login");
-      return;
-    }
-    load();
+    api.me().then(load).catch(() => router.push("/login"));
   }, [router, load]);
 
   const body = () => {
@@ -264,7 +249,7 @@ export default function InsightsPage() {
 
           The page's actual question, answered before the charts rather than
           left for the reader to work out by scanning six of them. */}
-      {data && !locked && <FindingsBand data={data} onJump={setSection} />}
+      {data && <FindingsBand data={data} onJump={setSection} />}
 
       {/* Rail first in the source and on the left at desktop width: it is this
           page's primary navigation, and it used to sit on the right where it
@@ -353,29 +338,7 @@ export default function InsightsPage() {
             </div>
           )}
 
-          {locked && !loading && (
-            <div className="card p-6 text-center">
-              <p className="font-display text-lg">
-                Looking up other players is a Master feature
-              </p>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-                Master unlocks insights for any Lichess or Chess.com account, and
-                the over-the-board careers of players in the reference database.
-                Your own insights stay free.
-              </p>
-              <div className="mt-4 flex justify-center gap-2">
-                <Link href="/pricing" className="btn-primary text-sm">
-                  See plans
-                </Link>
-                <button
-                  className="btn text-sm"
-                  onClick={() => setSubject({ kind: "me" })}
-                >
-                  Back to mine
-                </button>
-              </div>
-            </div>
-          )}
+
 
           {data && data.games === 0 && !loading && (
             <div className="card p-6 text-center">

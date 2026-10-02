@@ -6,7 +6,6 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-
 # ---------- auth ----------
 
 class RegisterRequest(BaseModel):
@@ -67,11 +66,6 @@ class AdminToken(BaseModel):
     display_name: str
 
 
-class PlanOverride(BaseModel):
-    plan: str = Field(pattern="^(free|pro|master)$")
-    # Required, not optional. This endpoint bypasses Stripe, so the audit row
-    # is the only account of why a user's plan changed.
-    reason: str = Field(min_length=3, max_length=500)
 
 
 # ---------- user ----------
@@ -80,7 +74,6 @@ class UserOut(BaseModel):
     id: int
     email: str
     display_name: str
-    plan: str
     email_verified: bool
     created_at: datetime
     puzzle_rating: int = 1200
@@ -90,6 +83,7 @@ class UserOut(BaseModel):
 
 
 class MeOut(UserOut):
+    local_mode: bool = False
     analyses_today: int
     daily_limit: int | None
     max_depth: int
@@ -135,7 +129,7 @@ class SearchResults(BaseModel):
 
 class GameDetail(GameOut):
     movetext: str
-    annotations: list["AnnotationOut"] = []
+    annotations: list[AnnotationOut] = []
 
 
 class ImportPgnRequest(BaseModel):
@@ -184,9 +178,10 @@ class AnnotationOut(BaseModel):
 # ---------- analysis ----------
 
 class AnalysePositionRequest(BaseModel):
+    engine: str = Field(default="stockfish", pattern=r"^[a-z0-9_-]{1,40}$")
     fen: str = Field(max_length=200)
     depth: int = Field(default=20, ge=1, le=40)
-    multipv: int = Field(default=1, ge=1, le=5)
+    multipv: int = Field(default=1, ge=1, le=10)
 
 
 class AnalysisJobOut(BaseModel):
@@ -286,7 +281,7 @@ class IntuitionOut(BaseModel):
     ply: int
 
 
-# ---------- opponent prep (master tier) ----------
+# ---------- opponent prep  ----------
 
 # Platform usernames are pasted straight into a lichess.org / chess.com URL
 # path, so the charset is the thing that keeps a "username" from being a path
@@ -331,8 +326,6 @@ class OpeningOut(BaseModel):
     description: str
     moves: str                # PGN with the opponent's alternatives in ( )
     rank: int                 # popularity order within the colour (1 = top)
-    tier: str                 # minimum plan that unlocks it
-    locked: bool = False      # computed for the requesting user
 
 
 # ---------- collections ----------

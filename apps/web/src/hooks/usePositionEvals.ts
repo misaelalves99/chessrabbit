@@ -28,7 +28,7 @@ export interface PositionEvalStore {
   record: (fen: string, line: EvalLine | undefined) => void;
 }
 
-export function usePositionEvals(): PositionEvalStore {
+export function usePositionEvals(engineId = "stockfish"): PositionEvalStore {
   const [found, setFound] = useState<ReadonlyMap<string, PositionEval>>(() => new Map());
 
   const record = useCallback((fen: string, line: EvalLine | undefined) => {
@@ -36,7 +36,7 @@ export function usePositionEvals(): PositionEvalStore {
     if (!next) return;
 
     setFound((prev) => {
-      const have = prev.get(fen);
+      const have = prev.get(`${engineId}:${fen}`);
       // A search reports at every depth on its way down. Only a deeper answer
       // is news; treating the rest as news would rebuild the map, and every
       // verdict derived from it, twenty times per position.
@@ -44,15 +44,15 @@ export function usePositionEvals(): PositionEvalStore {
 
       const m = new Map(prev);
       if (m.size >= MAX_POSITIONS) m.clear();
-      m.set(fen, next);
+      m.set(`${engineId}:${fen}`, next);
       return m;
     });
-  }, []);
+  }, [engineId]);
 
   const evalAt = useCallback(
     // A finished game outranks anything the engine says about it.
-    (fen: string): PositionEval | null => terminalEval(fen) ?? found.get(fen) ?? null,
-    [found]
+    (fen: string): PositionEval | null => terminalEval(fen) ?? found.get(`${engineId}:${fen}`) ?? null,
+    [found, engineId]
   );
 
   return { evalAt, record };

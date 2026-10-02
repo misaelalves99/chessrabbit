@@ -9,10 +9,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import revocation
-from app.core.config import settings
 from app.core.db import get_db
 from app.core.security import decode_access_token, decode_admin_token
-from app.core.tiers import is_paid
 from app.models import UsageDaily, User
 
 
@@ -20,7 +18,7 @@ async def get_current_user(
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Resolve the bearer token to a live user. Plan is read from the DB, never the token."""
+    """Resolve the bearer token to a live user. Account state is read from the database."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -79,52 +77,16 @@ async def get_optional_user(
         return None
 
 
-async def require_pro(user: User = Depends(get_current_user)) -> User:
-    if not is_paid(user.plan):
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={"code": "upgrade_required", "message": "This feature requires a Pro subscription"},
-        )
-    return user
 
 
-async def require_master(user: User = Depends(get_current_user)) -> User:
-    if user.plan != "master":
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={"code": "upgrade_required", "message": "This feature requires the Master plan"},
-        )
-    return user
 
 
-async def check_daily_session(user: User, kind: str, limit: int, label: str) -> None:
-    """
-    Redis-counted daily session gates (Puzzle Rush, intuition, Time Bank).
-    limit < 0 means unlimited. Raises 402 upgrade_required past the limit.
-    """
-    if limit < 0:
-        return
-    from app.core.redis_client import get_redis
-
-    key = f"{kind}:{user.id}:{date.today().isoformat()}"
-    redis = get_redis()
-    runs = await redis.incr(key)
-    await redis.expire(key, 172800)
-    if runs > limit:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "upgrade_required",
-                "message": f"The free plan includes {limit} {label} per day. "
-                           "Upgrade for unlimited training.",
-            },
-        )
 
 
 async def check_and_increment_usage(db: AsyncSession, user: User) -> int:
     """
-    Atomically bump today's analysis counter, enforcing the free-tier daily cap.
-    Returns the new count. Pro users are metered but never blocked.
+    Atomically count today's analyses without daily quotas.
+    Returns the new count for local usage statistics.
     """
     today = date.today()
 
@@ -143,14 +105,6 @@ async def check_and_increment_usage(db: AsyncSession, user: User) -> int:
     count = result.scalar_one()
     await db.commit()
 
-    if not is_paid(user.plan) and count > settings.FREE_DAILY_ANALYSES:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "code": "daily_limit_reached",
-                "message": f"Free plan allows {settings.FREE_DAILY_ANALYSES} analyses per day. Upgrade for unlimited.",
-            },
-        )
     return count
 
 

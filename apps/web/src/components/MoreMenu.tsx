@@ -69,8 +69,8 @@ const GROUPS: {
     heading: "Account",
     items: [
       {
-        href: "/pricing",
-        label: "Plans and pricing",
+        href: "/download",
+        label: "Download and setup",
         blurb: "Compare what each tier unlocks",
       },
     ],

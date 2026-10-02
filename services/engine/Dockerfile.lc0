@@ -1,0 +1,25 @@
+FROM python:3.12-slim-bookworm AS lc0-builder
+ARG LC0_VERSION=v0.32.1
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git g++ meson ninja-build libopenblas-dev pkg-config ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN git clone --branch ${LC0_VERSION} --depth 1 --recurse-submodules https://github.com/LeelaChessZero/lc0.git /src/lc0
+WORKDIR /src/lc0
+RUN meson setup build --buildtype=release -Dblas=true -Dplain_cuda=false -Dgtest=false -Dispc=false -Dnative_arch=false -Ddefault_backend=blas \
+ && meson compile -C build
+
+FROM python:3.12-slim-bookworm
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends stockfish libopenblas0-pthread ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=lc0-builder /src/lc0/build/lc0 /usr/local/bin/lc0
+ENV STOCKFISH_PATH=/usr/games/stockfish
+ENV LC0_PATH=/usr/local/bin/lc0
+ENV LC0_WEIGHTS_PATH=/engines/lc0/network.pb.gz
+WORKDIR /srv
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+RUN useradd --create-home --uid 10001 chessrabbit
+USER chessrabbit
+CMD ["python", "worker.py"]

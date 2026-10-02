@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user, usage_today
-from app.core.tiers import is_paid
 from app.models import Game, User
 from app.schemas import MeOut, ProfileUpdate
 
@@ -20,16 +19,16 @@ router = APIRouter(tags=["users"])
 async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     used = await usage_today(db, user)
     return MeOut(
+        local_mode=settings.LOCAL_MODE,
         id=user.id,
         email=user.email,
         display_name=user.display_name,
-        plan=user.plan,
         email_verified=user.email_verified,
         created_at=user.created_at,
         analyses_today=used,
-        daily_limit=None if is_paid(user.plan) else settings.FREE_DAILY_ANALYSES,
-        max_depth=settings.max_depth_for(user.plan),
-        max_multipv=settings.max_multipv_for(user.plan),
+        daily_limit=None,
+        max_depth=settings.ENGINE_MAX_DEPTH,
+        max_multipv=settings.ENGINE_MAX_MULTIPV,
     )
 
 
@@ -58,7 +57,6 @@ async def export_my_data(
         "account": {
             "email": user.email,
             "display_name": user.display_name,
-            "plan": user.plan,
             "created_at": user.created_at.isoformat(),
         },
         "games": [

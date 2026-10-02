@@ -1,15 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { Me } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, EngineInfo, Me } from "@/lib/api";
 import { BOARD_THEMES } from "@/lib/boardTheme";
 import {
-  DEFAULTS, DEPTH_CHOICES as DEPTHS, LINE_CHOICES as LINES,
+  DEPTH_CHOICES as DEPTHS, LINE_CHOICES as LINES,
   resetSettings, updateSettings, useSettings,
 } from "@/lib/settings";
 
-const ENGINE_NAME = "Stockfish 18";
 const SPEEDS = [
   { ms: 0, label: "Off" },
   { ms: 120, label: "Fast" },
@@ -70,13 +68,14 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export default function SettingsModal({ me, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("engine");
   const s = useSettings();
+  const [engines, setEngines] = useState<EngineInfo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.listEngines().then(setEngines).catch(() => setError("Could not load engines. Check the worker."));
+  }, []);
 
-  // The socket clamps both of these to the plan ceiling server-side, so the UI
-  // shows the real limit rather than letting someone pick a number that would
-  // be silently ignored.
-  const maxDepth = me?.max_depth ?? DEFAULTS.depth;
-  const maxLines = me?.max_multipv ?? DEFAULTS.multipv;
-  const capped = me != null && me.plan === "free";
+  const maxDepth = me?.max_depth ?? 40;
+  const maxLines = me?.max_multipv ?? 10;
 
   return (
     <div
@@ -125,22 +124,23 @@ export default function SettingsModal({ me, onClose }: Props) {
               <section>
                 <p className="eyebrow mb-1">Game review</p>
                 <Row label="Engine">
-                  <span className="font-mono text-sm">{ENGINE_NAME}</span>
+                  <select className="input w-52" value={s.engine}
+                    onChange={(e) => updateSettings({ engine: e.target.value })}>
+                    {engines.length === 0 && <option value={s.engine}>{s.engine}</option>}
+                    {engines.map((engine) => <option key={engine.id} value={engine.id} disabled={!engine.available}>
+                      {engine.name}{engine.available ? "" : " (not configured)"}
+                    </option>)}
+                  </select>
                 </Row>
                 <p className="text-xs leading-relaxed text-muted">
-                  Reviews run server-side at your plan&apos;s strength — there is
-                  nothing to download, and the engine never runs in your browser.
+                  Engines run on your computer. This selection applies to live analysis and game reviews.
+                  Leela requires an Lc0 binary and network file; see the local setup guide.
                 </p>
-                {capped && (
-                  <Link
-                    href="/pricing"
-                    className="mt-2 flex items-center gap-2 rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-xs transition-colors hover:bg-gold/15"
-                  >
-                    <span aria-hidden>★</span>
-                    <span>Upgrade for deeper analysis and more lines</span>
-                    <span className="ml-auto text-gold">→</span>
-                  </Link>
-                )}
+                {engines.find((engine) => engine.id === s.engine)?.version &&
+                  <p className="mt-2 font-mono text-xs text-muted">{engines.find((engine) => engine.id === s.engine)?.version}</p>}
+                {error && <p className="text-xs text-bad">{error}</p>}
+                <a href="https://github.com/shivamjg101/chessrabbit/blob/codex/open-source-local-engines/docs/LOCAL_SETUP.md"
+                  className="mt-2 block text-xs text-accent underline">Configure engines</a>
               </section>
 
               <section className="border-t border-ivory/[0.06] pt-3">
@@ -154,7 +154,7 @@ export default function SettingsModal({ me, onClose }: Props) {
                   >
                     {DEPTHS.map((d) => (
                       <option key={d} value={d} disabled={d > maxDepth}>
-                        {d > maxDepth ? `Depth ${d} — locked` : `Depth ${d}`}
+                        {d > maxDepth ? `Depth ${d} — above resource limit` : `Depth ${d}`}
                       </option>
                     ))}
                   </select>
@@ -168,14 +168,14 @@ export default function SettingsModal({ me, onClose }: Props) {
                   >
                     {LINES.map((n) => (
                       <option key={n} value={n} disabled={n > maxLines}>
-                        {n > maxLines ? `${n} lines — locked` : `${n} line${n > 1 ? "s" : ""}`}
+                        {n > maxLines ? `${n} lines — above resource limit` : `${n} line${n > 1 ? "s" : ""}`}
                       </option>
                     ))}
                   </select>
                 </Row>
 
                 <p className="mt-1 text-xs leading-relaxed text-muted">
-                  Your plan allows depth {maxDepth} and {maxLines} line
+                  Resource limits allow depth {maxDepth} and {maxLines} line
                   {maxLines > 1 ? "s" : ""}. Deeper searches take longer and are
                   capped server-side.
                 </p>

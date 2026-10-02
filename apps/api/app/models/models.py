@@ -5,8 +5,18 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer,
-    SmallInteger, String, Text, UniqueConstraint, func,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,7 +31,6 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    plan: Mapped[str] = mapped_column(Text, default="free", nullable=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -29,7 +38,7 @@ class User(Base):
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     puzzle_rating: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
 
-    games: Mapped[list["Game"]] = relationship(back_populates="owner")
+    games: Mapped[list[Game]] = relationship(back_populates="owner")
 
 
 class RefreshToken(Base):
@@ -58,43 +67,8 @@ class EmailToken(Base):
     used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
-class Subscription(Base):
-    __tablename__ = "subscriptions"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
-    stripe_customer_id: Mapped[str] = mapped_column(Text, nullable=False)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    # Subscription lifecycle (migration 013). created_at was backfilled from
-    # updated_at, so rows predating that migration only approximate the start.
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    canceled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class SubscriptionEvent(Base):
-    """
-    Append-only billing history (migration 013).
-
-    `subscriptions` is overwritten in place by each webhook, so it can only ever
-    answer "who is paying now". This is what makes churn and new-subscriptions
-    -per-day computable.
-    """
-
-    __tablename__ = "subscription_events"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
-    event_type: Mapped[str] = mapped_column(Text, nullable=False)
-    plan: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Tier price at the time of the event, snapshotted so repricing a tier does
-    # not rewrite past revenue.
-    amount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stripe_event_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class DailyActiveUser(Base):
@@ -169,7 +143,7 @@ class Game(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    owner: Mapped["User | None"] = relationship(back_populates="games")
+    owner: Mapped[User | None] = relationship(back_populates="games")
 
 
 class GamePosition(Base):

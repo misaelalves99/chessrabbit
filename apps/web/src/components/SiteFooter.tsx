@@ -2,22 +2,15 @@
 
 import Link from "next/link";
 
-/**
- * The footer on the public pages.
- *
- * It exists for one reason beyond tidiness: BLUEPRINT §3.1 commits us to
- * crediting Stockfish visibly, and a credits page nothing links to does not
- * discharge that. Terms and Privacy sit here for the same reason — a consumer
- * has to be able to find them before paying, not after.
- */
+/** Public navigation and engine attribution. */
 export default function SiteFooter() {
   return (
     <footer className="border-t border-ivory/[0.07] px-4 py-6">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
         <span>© {new Date().getFullYear()} ChessRabbit</span>
         <nav className="flex flex-wrap gap-x-4 gap-y-1">
-          <Link href="/pricing" className="hover:text-ink hover:underline">
-            Pricing
+          <Link href="/download" className="hover:text-ink hover:underline">
+            Download
           </Link>
           <Link href="/terms" className="hover:text-ink hover:underline">
             Terms
@@ -39,7 +32,7 @@ export default function SiteFooter() {
           >
             Stockfish
           </a>{" "}
-          (GPL-3.0), run server-side. Not affiliated with ChessBase, Lichess or
+          and Leela Chess Zero (GPL-3.0), run locally. Not affiliated with ChessBase, Lichess or
           Chess.com.
         </span>
       </div>

@@ -8,25 +8,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
 from app.core.bulk import bulk_insert, bulk_upsert
-from app.core.config import settings
+from app.core.chess_utils import parse_pgn, positions_of_game
 from app.core.db import get_db
 from app.core.deps import get_current_user
 from app.core.ratelimit import user_rate_limit
-from app.core.chess_utils import parse_pgn, positions_of_game
-from app.core.tiers import is_paid
 from app.models import Annotation, Collection, CollectionGame, Game, GamePosition, User
 from app.schemas import (
-    AnnotationIn, AnnotationOut, CollectionIn, CollectionOut,
-    GameDetail, GameOut, GameUpdate, ImportPgnRequest, ImportResult,
+    AnnotationIn,
+    AnnotationOut,
+    CollectionIn,
+    CollectionOut,
+    GameDetail,
+    GameOut,
+    GameUpdate,
+    ImportPgnRequest,
+    ImportResult,
 )
 from app.services.importers import color_played, user_identities
 
 router = APIRouter(tags=["games"])
 
 
-async def _count_user_games(db: AsyncSession, user_id: int) -> int:
-    result = await db.execute(select(func.count(Game.id)).where(Game.owner_id == user_id))
-    return result.scalar_one()
 
 
 @router.get("/games", response_model=list[GameOut])
@@ -106,16 +108,6 @@ async def import_games(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "invalid_pgn", "message": "No valid games found in that PGN"},
-        )
-
-    existing = await _count_user_games(db, user.id)
-    if not is_paid(user.plan) and existing + len(parsed) > settings.FREE_MAX_GAMES:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "game_limit_reached",
-                "message": f"Free plan stores {settings.FREE_MAX_GAMES} games. Upgrade for unlimited.",
-            },
         )
 
     errors: list[str] = []

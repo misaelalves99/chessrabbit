@@ -2,7 +2,7 @@
 ChessRabbit API.
 
 A ChessBase-style chess database and analysis platform.
-Stockfish runs server-side only - see BLUEPRINT.md Section 3.
+Configured UCI engines run on the machine hosting the application.
 """
 
 from __future__ import annotations
@@ -24,8 +24,22 @@ from app.core.http_cache import cached_json, etag_response
 from app.core.redis_client import close_redis, get_redis
 from app.core.security import decode_admin_token
 from app.routers import (
-    accounts, admin, analysis, auth, billing, explorer, games, insights,
-    intuition, openings, play, prep, puzzles, studies, training, users,
+    accounts,
+    admin,
+    analysis,
+    auth,
+    engines,
+    explorer,
+    games,
+    insights,
+    intuition,
+    openings,
+    play,
+    prep,
+    puzzles,
+    studies,
+    training,
+    users,
 )
 from app.ws import analysis as ws_analysis
 
@@ -98,7 +112,7 @@ app = FastAPI(
 # reader's session.
 _cors_origins = [settings.APP_BASE_URL]
 _cors_origin_regex: str | None = None
-if not settings.is_production:
+if not settings.is_production and not settings.LOCAL_MODE:
     _cors_origins.append("http://localhost:3000")
     _cors_origin_regex = r"http://localhost:\d+"
 
@@ -232,74 +246,13 @@ async def health(authorization: str | None = Header(default=None)):
     return JSONResponse(status_code=code, content=body)
 
 
-@app.get("/tiers", tags=["meta"])
-async def list_tiers(request: Request):
-    """
-    Public plan matrix for the pricing page. Single source: core/tiers.py.
-
-    Identical for every caller and changes only when this image is rebuilt, so
-    it is cacheable by anything between us and the reader. The ETag means a
-    returning visitor's pricing page costs a 304 and no body.
-    """
-    from app.core.tiers import TIERS
-
-    payload = [
-        {
-            "id": t.id, "label": t.label, "price_monthly": t.price_monthly,
-            "reviews_per_day": t.reviews_per_day, "puzzles_per_day": t.puzzles_per_day,
-            "rush_per_day": t.rush_per_day,
-            "intuition_per_day": t.intuition_per_day, "clock_per_day": t.clock_per_day,
-            "openings_white": t.openings_white,
-            "openings_black": t.openings_black, "opponent_prep": t.opponent_prep,
-        }
-        for t in TIERS.values()
-    ]
-    return etag_response(request, payload, max_age=3600, public=True)
 
 
-async def _engine_version() -> str | None:
-    """
-    The engine build this deployment actually ran, or None if it never has.
-
-    §17 asks the credits page to state a version, and no constant in the source
-    can: the engine Dockerfile installs whatever the latest official release
-    was when the image was built. The workers stamp every cached evaluation
-    with the build string the engine reported over UCI, so the newest of those
-    is the honest answer. Best effort - the credits page is complete without it
-    and must never fail because this did.
-    """
-    from sqlalchemy import text as sql
-
-    from app.core.db import SessionLocal
-
-    try:
-        async with SessionLocal() as db:
-            row = await db.execute(
-                sql(
-                    "SELECT engine_version FROM analysis_cache "
-                    "ORDER BY created_at DESC LIMIT 1"
-                )
-            )
-            return row.scalar_one_or_none()
-    except Exception:
-        log.warning("engine version lookup failed", exc_info=True)
-        return None
 
 
 @app.get("/open-source", tags=["meta"])
 async def open_source_credits(request: Request):
-    """
-    Attribution for the open-source projects ChessRabbit depends on.
-    Required by BLUEPRINT.md Section 17 launch checklist.
-
-    The web app renders its own copy of this at /open-source so the credits
-    survive the API being down; this endpoint is for programmatic use and for
-    the one fact the static page cannot know, the engine version.
-
-    That one fact costs a query against analysis_cache, the largest table here,
-    for a page whose content changes when the engine image does - so it is
-    memoised for an hour and served with an ETag.
-    """
+    """Attribution also available in THIRD_PARTY_NOTICES.md."""
     payload = await cached_json("meta:open-source", 3600, _credits_payload)
     return etag_response(request, payload, max_age=3600, public=True)
 
@@ -309,9 +262,11 @@ async def _credits_payload() -> dict:
         "stockfish": {
             "license": "GPL-3.0",
             "source": "https://github.com/official-stockfish/Stockfish",
-            "version": await _engine_version(),
-            "note": "Run unmodified, server-side only. Never distributed to clients.",
+
+            "note": "Local UCI process; installed from Debian packages in Docker.",
         },
+        "lc0": {"license": "GPL-3.0-or-later", "source": "https://github.com/LeelaChessZero/lc0", "note": "Optional local UCI engine; requires a network file."},
+        "chessrabbit": {"license": "GPL-3.0"},
         "python-chess": {"license": "GPL-3.0", "note": "Server-side only"},
         "chess.js": {"license": "BSD-2-Clause"},
         "react-chessboard": {"license": "MIT"},
@@ -337,5 +292,12 @@ app.include_router(openings.router)
 app.include_router(prep.router)
 app.include_router(intuition.router)
 app.include_router(admin.router)
-app.include_router(billing.router)
 app.include_router(ws_analysis.router)
+
+
+app.include_router(engines.router)
+
+
+@app.get("/app-config")
+async def app_config():
+    return {"local_mode": settings.LOCAL_MODE}

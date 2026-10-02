@@ -94,7 +94,7 @@ const PIPELINE = [
   {
     n: "02",
     title: "Find the leaks",
-    body: "Server-side Stockfish marks every move and binds each blunder to the position it happened in.",
+    body: "Your selected local engine reviews every move and binds each blunder to the position it happened in.",
     href: "/app",
     cta: "Open the board",
   },
@@ -115,7 +115,7 @@ export default function LandingPage() {
           <span className="font-display text-lg text-ink">ChessRabbit</span>
           <div className="ml-auto flex items-center gap-2">
             <Link href="/login" className="btn">Sign in</Link>
-            <Link href="/register" className="btn-primary">Create account</Link>
+            <Link href="/download" className="btn-primary">Download</Link>
           </div>
         </div>
       </header>
@@ -151,11 +151,11 @@ export default function LandingPage() {
             </div>
 
             <div className="mt-10 flex flex-wrap gap-3">
-              <Link href="/register" className="btn-primary px-5 py-2.5">
-                Create free account
+              <Link href="/download" className="btn-primary px-5 py-2.5">
+                Download and run locally
               </Link>
               <Link href="/app" className="btn px-5 py-2.5">
-                Try the board first
+                Open the board
               </Link>
             </div>
           </div>
