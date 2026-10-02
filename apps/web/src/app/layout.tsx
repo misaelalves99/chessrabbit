@@ -1,9 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo, IBM_Plex_Mono, Instrument_Serif } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-// Self-hosted and preloaded at build time, so first paint never waits on a
-// third-party round trip. `display: swap` means text is readable immediately
+// Bundled fonts remove Google Fonts requests from builds and local installs.
+// `display: swap` means text is readable immediately
 // and the variable handoff to Tailwind keeps `font-sans` / `font-display` /
 // `font-mono` working exactly as before.
 //
@@ -12,18 +12,19 @@ import "./globals.css";
 
 // Body and UI. Squarer and more industrial than Inter, which is what keeps a
 // 13px label from looking like every other app's 13px label.
-const archivo = Archivo({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const archivo = localFont({
+  src: "./fonts/archivo-latin.woff2",
+  weight: "100 900",
   display: "swap",
   variable: "--font-sans",
 });
 
 // Display. One weight on purpose — there is no bold to reach for, so it can
 // only be used where a real display face belongs: page titles and big figures.
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: ["400"],
+const instrumentSerif = localFont({
+  src: "./fonts/instrument-serif-latin.woff2",
+  weight: "400",
+  adjustFontFallback: "Times New Roman",
   display: "swap",
   variable: "--font-display",
 });
@@ -31,9 +32,12 @@ const instrumentSerif = Instrument_Serif({
 // Algebraic notation — Nf3, Bxc6, O-O — is mostly capitals and figures, and
 // this is a mono whose capitals and figures are worth looking at. Notation is
 // the app's third typeface, not its caption face.
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const plexMono = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-mono-400-latin.woff2", weight: "400" },
+    { path: "./fonts/ibm-plex-mono-500-latin.woff2", weight: "500" },
+    { path: "./fonts/ibm-plex-mono-600-latin.woff2", weight: "600" },
+  ],
   display: "swap",
   variable: "--font-mono",
 });

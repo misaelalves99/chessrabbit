@@ -15,6 +15,12 @@ ChessRabbit source is GPL-3.0. Dependency licenses continue to apply independent
 | SQLAlchemy | MIT | https://github.com/sqlalchemy/sqlalchemy |
 | PostgreSQL | PostgreSQL License | https://www.postgresql.org/about/licence/ |
 | Redis 7.2 | BSD-3-Clause | https://github.com/redis/redis/tree/7.2 |
+| Archivo | SIL OFL 1.1 | https://github.com/google/fonts/tree/main/ofl/archivo |
+| Instrument Serif | SIL OFL 1.1 | https://github.com/google/fonts/tree/main/ofl/instrumentserif |
+| IBM Plex Mono | SIL OFL 1.1 | https://github.com/google/fonts/tree/main/ofl/ibmplexmono |
+
+The interface bundles Latin WOFF2 font files. Their original copyright and
+license texts are included in `apps/web/src/app/fonts/` beside the font files.
 
 See Python requirement files, the npm lockfile and installed packages for all direct/transitive dependencies and their license texts. Container base images include additional operating-system packages and notices.
 
