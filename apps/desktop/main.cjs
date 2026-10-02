@@ -139,7 +139,8 @@ function failure(message) {
   console.error(message);
   if (!smoke && !quitting) dialog.showErrorBox("ChessRabbit could not start", message);
   process.exitCode = 1;
-  app.quit();
+  if (!backend || backendExited) app.exit(1);
+  else app.quit();
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();

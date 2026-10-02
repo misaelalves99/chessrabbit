@@ -109,7 +109,8 @@ async def run(resources: Path, data: Path):
                 print(json.dumps({"type": "ready", "url": origin}), flush=True)
 
         def watch_parent():
-            sys.stdin.buffer.read()
+            while os.read(sys.stdin.fileno(), 1):
+                pass
             server.should_exit = True
 
         readiness = asyncio.create_task(ready())

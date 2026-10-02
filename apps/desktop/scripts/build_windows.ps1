@@ -24,7 +24,7 @@ try {
         & $Python -m PyInstaller --noconfirm --onedir --name ChessRabbitBackend `
             --distpath dist/desktop-backend --workpath .test-cache/pyinstaller --specpath .test-cache `
             --paths apps/api --paths services/engine --paths apps/desktop/backend `
-            --collect-submodules app --collect-submodules fakeredis --collect-all asyncpg `
+            --collect-submodules app --collect-all fakeredis --collect-all asyncpg `
             --collect-all psycopg_binary --hidden-import sqlalchemy.dialects.postgresql.asyncpg `
             --hidden-import uvicorn.logging --hidden-import uvicorn.loops.asyncio `
             --hidden-import uvicorn.protocols.http.h11_impl --hidden-import uvicorn.protocols.websockets.websockets_impl `
