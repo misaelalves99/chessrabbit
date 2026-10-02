@@ -2,7 +2,13 @@
 
 Free, open-source chess analysis, game storage, opening study and training. Run it on your own computer with Stockfish, Leela Chess Zero (Lc0), or another UCI engine.
 
-## Run on your computer
+## Install on Windows
+
+Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.0/ChessRabbit-Setup.exe), run it, and open **ChessRabbit** from the desktop or Start menu. Windows 10/11 x64 is supported. The installer bundles the app, Stockfish 19 and local storage. No Docker, Python, Node.js, database setup or account registration is required.
+
+Use **Engines → Add Leela Chess Zero** to select your local `lc0.exe` and network, or **Add UCI engine** for another engine. Then choose it in Analysis settings. See the [desktop guide](docs/DESKTOP.md) for data, engines, backups and building the installer.
+
+## Development and self-hosting
 
 Install Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin (Linux). Download this branch as a ZIP and extract it, or clone it:
 
@@ -29,13 +35,14 @@ To stop the app and keep your data: `docker compose down`.
 
 Every feature is available to every account. Resource limits apply equally to protect the machine running the app. There are no paid plans, billing routes, subscription checks or license keys.
 
-Your games and results are stored in local Docker volumes. A new install starts with an empty personal/reference database. Reference games, puzzles, neural networks and Syzygy tablebases are optional datasets installed separately.
+Your desktop games and results are stored in `%APPDATA%/ChessRabbit/local`. Docker deployments use local volumes. A new install starts with an empty personal/reference database. Reference games, puzzles, neural networks and Syzygy tablebases are optional datasets installed separately.
 
 ## Project layout
 
 | Directory | Purpose |
 | --- | --- |
 | `apps/web` | Next.js/React/TypeScript interface, exported as static files |
+| `apps/desktop` | Electron Windows app, embedded runtime and NSIS installer |
 | `apps/api` | FastAPI, authentication, chess data and analysis API |
 | `services/engine` | Python UCI worker, engine profiles, Redis queues |
 | `db/migrations` | PostgreSQL schema |
@@ -52,4 +59,4 @@ Existing installations must apply `db/migrations/016_community_edition.sql` befo
 
 ## License
 
-ChessRabbit is licensed under **GPL-3.0**, see [LICENSE](LICENSE). Third-party software and datasets retain their licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This branch provides source and Docker build recipes; native installers and prebuilt release packages are future work.
+ChessRabbit is licensed under **GPL-3.0**, see [LICENSE](LICENSE). Third-party software and datasets retain their licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Windows build workflow produces an installer and corresponding source release.

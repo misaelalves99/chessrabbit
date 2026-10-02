@@ -263,7 +263,7 @@ async def _credits_payload() -> dict:
             "license": "GPL-3.0",
             "source": "https://github.com/official-stockfish/Stockfish",
 
-            "note": "Local UCI process; installed from Debian packages in Docker.",
+            "note": "Local UCI process; bundled with the Windows app and installed from Debian packages in Docker.",
         },
         "lc0": {"license": "GPL-3.0-or-later", "source": "https://github.com/LeelaChessZero/lc0", "note": "Optional local UCI engine; requires a network file."},
         "chessrabbit": {"license": "GPL-3.0"},

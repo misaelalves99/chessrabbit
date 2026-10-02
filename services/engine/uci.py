@@ -9,10 +9,50 @@ import asyncio
 import logging
 import os
 import shutil
+import subprocess
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
+
+
+class _WindowsPipe:
+    """Thread-backed pipes also work on psycopg's Windows selector loop."""
+
+    def __init__(self, pipe):
+        self.pipe = pipe
+
+    async def readline(self):
+        return await asyncio.to_thread(self.pipe.readline)
+
+    def write(self, data):
+        self.pipe.write(data)
+
+    async def drain(self):
+        await asyncio.to_thread(self.pipe.flush)
+
+
+class _WindowsProcess:
+    def __init__(self, binary: str, args: list[str]):
+        self.process = subprocess.Popen(
+            [binary, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        self.stdin = _WindowsPipe(self.process.stdin)
+        self.stdout = _WindowsPipe(self.process.stdout)
+
+    @property
+    def returncode(self):
+        return self.process.poll()
+
+    async def wait(self):
+        code = await asyncio.to_thread(self.process.wait)
+        self.process.stdin.close()
+        self.process.stdout.close()
+        return code
+
+    def kill(self):
+        self.process.kill()
 
 
 @dataclass
@@ -149,20 +189,20 @@ class StockfishEngine:
         self.args = args or []
         self.options = options or {}
         self.supported_options: set[str] = set()
-        self.proc: asyncio.subprocess.Process | None = None
+        self.proc: asyncio.subprocess.Process | _WindowsProcess | None = None
         self.version: str = "unknown"
         self._lock = asyncio.Lock()
 
     # ---------- process lifecycle ----------
 
     async def start(self) -> None:
-        self.proc = await asyncio.create_subprocess_exec(
-            self.binary,
-            *self.args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        if os.name == "nt":
+            self.proc = _WindowsProcess(self.binary, self.args)
+        else:
+            self.proc = await asyncio.create_subprocess_exec(
+                self.binary, *self.args, stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
         self.supported_options.clear()
         await self._send("uci")
         while True:

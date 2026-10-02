@@ -1,0 +1,106 @@
+name: Windows desktop installer
+
+on:
+  push:
+    branches: ['codex/open-source-local-engines']
+    paths:
+      - 'apps/desktop/**'
+      - 'apps/api/**'
+      - 'apps/web/**'
+      - 'services/engine/**'
+      - 'db/migrations/**'
+      - '.github/workflows/desktop.yml'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+  workflow_dispatch:
+
+concurrency:
+  group: windows-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install build dependencies
+        run: |
+          python -m pip install -r apps/desktop/requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed' }
+          npm ci --prefix apps/web
+          if ($LASTEXITCODE -ne 0) { throw 'Web dependency installation failed' }
+          npm ci --prefix apps/desktop
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop dependency installation failed' }
+      - name: Build Windows installer
+        run: ./apps/desktop/scripts/build_windows.ps1
+      - name: Install and exercise the real app twice
+        run: |
+          $installDirectory = Join-Path $env:RUNNER_TEMP 'ChessRabbit-installed'
+          $testWorkspace = Join-Path $env:RUNNER_TEMP 'ChessRabbit-smoke'
+          $installer = Start-Process -FilePath "$PWD/dist/windows/ChessRabbit-Setup.exe" -ArgumentList '/S', "/D=$installDirectory" -WindowStyle Hidden -PassThru -Wait
+          if ($installer.ExitCode -ne 0) { throw 'Installer failed' }
+          $exe = Join-Path $installDirectory 'ChessRabbit.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw 'Installed executable is missing' }
+          $shortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ChessRabbit.lnk'
+          if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Desktop shortcut is missing' }
+          foreach ($run in 1..2) {
+            $stdout = Join-Path $env:RUNNER_TEMP "desktop-smoke-$run.txt"
+            $stderr = Join-Path $env:RUNNER_TEMP "desktop-smoke-$run-error.txt"
+            $process = Start-Process -FilePath $exe -ArgumentList '--smoke-test', "--data-dir=$testWorkspace" -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            if (-not $process.WaitForExit(180000)) { Stop-Process -Id $process.Id; throw 'Desktop smoke test timed out' }
+            Get-Content -LiteralPath $stdout
+            Get-Content -LiteralPath $stderr
+            if ($process.ExitCode -ne 0 -or -not (Select-String -LiteralPath $stdout -SimpleMatch 'CHESSRABBIT_SMOKE_PASSED' -Quiet)) { throw 'Installed runtime smoke test failed' }
+            $orphans = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installDirectory, [StringComparison]::OrdinalIgnoreCase) }
+            if ($orphans) { throw 'Installed app left a background process running' }
+          }
+      - name: Package corresponding source and notices
+        run: |
+          git archive --format=zip HEAD -o dist/windows/ChessRabbit-Source.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Source packaging failed' }
+          Copy-Item -LiteralPath .test-cache/desktop-downloads/stockfish-19.zip -Destination dist/windows/Stockfish-19-Upstream.zip
+          $assets = Get-ChildItem dist/windows -File | Where-Object { $_.Extension -in '.exe', '.zip' }
+          $assets | ForEach-Object { "{0}  {1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name } | Set-Content dist/windows/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ChessRabbit-Windows-x64
+          path: |
+            dist/windows/ChessRabbit-Setup.exe
+            dist/windows/ChessRabbit-Source.zip
+            dist/windows/Stockfish-19-Upstream.zip
+            dist/windows/SHA256SUMS.txt
+          if-no-files-found: warn
+      - name: Publish tested desktop prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'desktop-v' + (Get-Content apps/desktop/package.json | ConvertFrom-Json).version
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host 'This version is already published. Bump apps/desktop/package.json to publish a new version.'
+          } else {
+            $notes = @'
+          Install ChessRabbit-Setup.exe on Windows 10/11 x64, then open ChessRabbit from your desktop or Start menu. Stockfish 19 and local storage are included. No Docker or development tools are needed.
+
+          Use Engines → Add Leela Chess Zero to select lc0.exe and its network, or add another local UCI engine. All features are free; donations are optional.
+
+          This prerelease installer is unsigned. ChessRabbit source and build scripts, the unmodified upstream Stockfish archive, and SHA-256 checksums are attached. Stockfish source and notices are also included in the installed application.
+          '@
+            $notes | Set-Content release-notes.md -Encoding utf8
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ChessRabbit $($tag.Substring(9)) for Windows" --prerelease --notes-file release-notes.md dist/windows/ChessRabbit-Setup.exe dist/windows/ChessRabbit-Source.zip dist/windows/Stockfish-19-Upstream.zip dist/windows/SHA256SUMS.txt
+            if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+          }

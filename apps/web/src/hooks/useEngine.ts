@@ -54,7 +54,10 @@ export function useEngine() {
     }
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(`${WS_URL}/ws/analysis?token=${token}`);
+    const url = new URL(`${WS_URL}/ws/analysis`, window.location.href);
+    url.protocol = url.protocol === "https:" || url.protocol === "wss:" ? "wss:" : "ws:";
+    url.searchParams.set("token", token);
+    const ws = new WebSocket(url.href);
     wsRef.current = ws;
 
     ws.onopen = () => {
