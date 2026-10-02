@@ -1,5 +1,13 @@
 # Local setup
 
+## Windows desktop app
+
+Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.0/ChessRabbit-Setup.exe), run it, and open ChessRabbit from the desktop or Start menu. The installer includes Stockfish and local storage. Desktop users do not need the development setup below.
+
+For Leela, use **Engines → Add Leela Chess Zero** in the app and select your `lc0.exe` and network file. Use **Engines → Add UCI engine** for another engine, then select it in Analysis settings. See [the desktop guide](DESKTOP.md) for Windows installation, engines, backups and troubleshooting.
+
+The remaining sections cover Docker development, self-hosting and standalone workers.
+
 ## Stockfish: default installation
 
 1. Install Docker Desktop on Windows/macOS, or Docker Engine plus Compose v2 on Linux.
