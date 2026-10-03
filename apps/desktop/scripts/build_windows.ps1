@@ -21,7 +21,7 @@ try {
         } finally { Pop-Location }
     }
     Invoke-Checked {
-        & $Python -m PyInstaller --noconfirm --onedir --name ChessRabbitBackend `
+        & $Python -m PyInstaller --noconfirm --clean --noupx --noconsole --onedir --name ChessRabbitBackend `
             --distpath dist/desktop-backend --workpath .test-cache/pyinstaller --specpath .test-cache `
             --paths apps/api --paths services/engine --paths apps/desktop/backend `
             --collect-submodules app --collect-all fakeredis --collect-all asyncpg `
