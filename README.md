@@ -8,6 +8,12 @@ Free desktop chess analysis and training for Windows. ChessRabbit runs on your c
 
 If ChessRabbit helps your training, please star this repo so more chess players can find it.
 
+## Contributors welcome
+
+Help make local chess analysis easier to use. Start with a [good first issue](https://github.com/shivamjg101/chessrabbit/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22), read [Contributing](CONTRIBUTING.md), or ask a question in [Discussions](https://github.com/shivamjg101/chessrabbit/discussions). React/TypeScript, Python, Windows testing, accessibility and documentation contributions are welcome.
+
+Joining us during October? Read our [Hacktoberfest 2026 contribution guide](docs/HACKTOBERFEST.md). Contributions are welcome year-round; Hacktoberfest 2026 no longer awards rewards for pull requests.
+
 ## Why Players Try It
 
 - One Windows installer. No Docker, Node.js, Python, database setup or account registration.
