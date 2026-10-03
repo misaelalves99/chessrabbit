@@ -197,7 +197,8 @@ export default function AnalysisBoard({
   const [explorer, setExplorer] = useState<ExplorerMove[]>([]);
   const [explorerTotal, setExplorerTotal] = useState(0);
   const [explorerScope, setExplorerScope] = useState<ExplorerScope>("reference");
-  const [explorerError, setExplorerError] = useState(false);
+  const [explorerError, setExplorerError] = useState<string | null>(null);
+  const [explorerRefresh, setExplorerRefresh] = useState(0);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -543,12 +544,18 @@ export default function AnalysisBoard({
   // explorer answer is applied immediately, so revisiting a position you have
   // already seen never flickers or waits.
   useEffect(() => {
+    // Abort immediately on navigation, including when the next position is cached.
+    explorerAbort.current?.abort();
     const key = `${explorerScope}:${fen}`;
     const hit = explorerCache.current.get(key);
     if (hit) {
       setExplorer(hit.moves);
       setExplorerTotal(hit.total);
-      setExplorerError(false);
+      setExplorerError(null);
+    } else {
+      setExplorer([]);
+      setExplorerTotal(0);
+      setExplorerError(null);
     }
 
     const timer = setTimeout(() => {
@@ -566,25 +573,26 @@ export default function AnalysisBoard({
       api
         .explorer(fen, explorerScope, ctrl.signal)
         .then((res) => {
+          if (ctrl.signal.aborted) return;
           if (explorerCache.current.size >= EXPLORER_CACHE_MAX) {
             explorerCache.current.clear();
           }
           explorerCache.current.set(key, { moves: res.moves, total: res.total_games });
           setExplorer(res.moves);
           setExplorerTotal(res.total_games);
-          setExplorerError(false);
+          setExplorerError(null);
         })
-        .catch(() => {
+        .catch((err) => {
           if (ctrl.signal.aborted) return; // superseded, not a failure
           setExplorer([]);
           setExplorerTotal(0);
-          setExplorerError(true);
+          setExplorerError(err instanceof ApiError ? err.message : "Could not load explorer statistics. Please retry.");
         });
     }, SETTLE_MS);
 
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); explorerAbort.current?.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fen, engine.connected, autoAnalyse, explorerScope, settings.depth, settings.multipv, settings.engine]);
+  }, [fen, engine.connected, autoAnalyse, explorerScope, explorerRefresh, settings.depth, settings.multipv, settings.engine]);
 
   useEffect(() => () => explorerAbort.current?.abort(), []);
 
@@ -1037,6 +1045,7 @@ export default function AnalysisBoard({
               scope={explorerScope}
               onScope={setExplorerScope}
               error={explorerError}
+              onRetry={() => { explorerCache.current.clear(); setExplorerRefresh((value) => value + 1); }}
               onPlay={(uci) => onDrop(uci.slice(0, 2), uci.slice(2, 4))}
               fen={fen}
             />

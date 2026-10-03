@@ -7,6 +7,12 @@ import { getSettings } from "@/lib/settings";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Session memory only: never persist a third-party credential in browser storage.
+let lichessExplorerToken = "";
+export function setLichessExplorerToken(token: string) {
+  lichessExplorerToken = token.trim();
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;
@@ -320,6 +326,7 @@ export interface Repertoire {
   color: "white" | "black";
   card_count: number;
   due_count: number;
+  prep_sources?: Record<string, number> | null;
 }
 
 export interface Opening {
@@ -589,7 +596,9 @@ export const api = {
   ) =>
     request<{ fen: string; total_games: number; moves: ExplorerMove[] }>(
       "/explorer",
-      { method: "POST", body: JSON.stringify({ fen, scope }), signal }
+      { method: "POST", body: JSON.stringify({ fen, scope,
+        ...(scope === "lichess_live" && lichessExplorerToken ? { lichess_token: lichessExplorerToken } : {}),
+      }), signal }
     ),
 
   // ---- reference database search ----

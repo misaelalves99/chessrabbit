@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 
 import httpx
@@ -35,7 +36,7 @@ log = logging.getLogger(__name__)
 
 MASTERS_URL = "https://explorer.lichess.ovh/masters"
 _TIMEOUT = httpx.Timeout(6.0, connect=3.0, read=6.0)
-_HEADERS = {"User-Agent": "ChessRabbit/0.1 (opening-explorer; noreply@chessrabbit.app)"}
+_HEADERS = {"User-Agent": "ChessRabbit (https://github.com/shivamjg101/chessrabbit)"}
 _CACHE_TTL = 3600  # seconds; masters data barely moves within an hour
 _STALE_TTL = 86400 * 7  # how long an entry stays usable as a fallback
 _CACHE_PREFIX = "lex:masters:"
@@ -56,17 +57,24 @@ _breaker = breaker(
 class ExplorerUnavailable(Exception):
     """Upstream Lichess explorer errored, timed out, or rate-limited us."""
 
+    def __init__(self, message: str, code: str = "explorer_unavailable"):
+        super().__init__(message)
+        self.code = code
 
-async def _fetch(fen: str) -> dict:
+
+async def _fetch(fen: str, token: str) -> dict:
     """One call to Lichess. Every failure mode raises ExplorerUnavailable."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
+        async with httpx.AsyncClient(timeout=_TIMEOUT, headers={**_HEADERS, "Authorization": f"Bearer {token}"}) as client:
             res = await client.get(
                 MASTERS_URL,
                 params={"fen": fen, "moves": 20, "topGames": 0},
             )
     except httpx.HTTPError as exc:
-        raise ExplorerUnavailable(f"request failed: {exc}") from exc
+        raise ExplorerUnavailable("Cannot reach Lichess. Check your internet connection and retry.") from exc
+
+    if res.status_code in (401, 403):
+        raise ExplorerUnavailable("Lichess rejected this token. Create a new personal API token with no permissions selected and connect again.", "lichess_auth_required")
 
     if res.status_code == 429:
         raise ExplorerUnavailable("rate limited by Lichess")
@@ -74,7 +82,10 @@ async def _fetch(fen: str) -> dict:
         raise ExplorerUnavailable(f"HTTP {res.status_code}")
 
     try:
-        return res.json()
+        data = res.json()
+        if not isinstance(data, dict) or not isinstance(data.get("moves"), list):
+            raise ValueError("Expected explorer statistics")
+        return data
     except ValueError as exc:
         raise ExplorerUnavailable("malformed response") from exc
 
@@ -94,7 +105,7 @@ async def _cached(key: str) -> tuple[dict | None, bool]:
         return None, False
 
 
-async def masters_moves(fen: str) -> dict:
+async def masters_moves(fen: str, token: str | None = None) -> dict:
     """
     Return Lichess's raw masters response for a FEN:
     ``{"white": int, "draws": int, "black": int, "moves": [...]}``.
@@ -105,18 +116,23 @@ async def masters_moves(fen: str) -> dict:
     caller can still distinguish "no master games here" (a valid empty result)
     from "could not reach Lichess".
     """
-    key = _CACHE_PREFIX + fen
+    if not token or not re.fullmatch(r"[A-Za-z0-9_-]{10,512}", token):
+        raise ExplorerUnavailable("Connect a Lichess personal API token below to use Live explorer. No token permissions are needed.", "lichess_auth_required")
+    # Move counters do not change opening statistics; transpositions share a cache.
+    key = _CACHE_PREFIX + " ".join(fen.split()[:4])
     cached, fresh = await _cached(key)
     if cached is not None and fresh:
         return cached
 
     try:
-        data = await _breaker.call(_fetch, fen)
+        data = await _breaker.call(_fetch, fen, token)
     except (ExplorerUnavailable, CircuitOpen) as exc:
+        if isinstance(exc, ExplorerUnavailable) and exc.code == "lichess_auth_required":
+            raise
         if cached is not None:
             log.info("Serving stale masters data for %s (%s)", fen, exc)
             return cached
-        raise ExplorerUnavailable(str(exc)) from exc
+        raise ExplorerUnavailable("Lichess explorer is temporarily unavailable. Please retry shortly.") from exc
 
     try:
         await get_redis().setex(

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { setLichessExplorerToken } from "@/lib/api";
 import type { ExplorerMove, ExplorerScope } from "@/lib/api";
 
 const SCOPES: { id: ExplorerScope; label: string; title?: string }[] = [
@@ -14,15 +16,15 @@ interface Props {
   total: number;
   scope: ExplorerScope;
   onScope: (s: ExplorerScope) => void;
-  error: boolean;
+  error: string | null;
+  onRetry: () => void;
   onPlay: (uci: string) => void;
   /** The position on the board, so it can be looked up in the database. */
   fen: string;
 }
 
-function emptyText(scope: ExplorerScope, error: boolean): string {
-  if (error && scope === "lichess_live")
-    return "Live Lichess explorer is unavailable right now — try again shortly.";
+function emptyText(scope: ExplorerScope, error: string | null): string {
+  if (error) return error;
   if (scope === "mine") return "None of your games reached this position yet.";
   if (scope === "lichess_live")
     return "No master games have reached this position on Lichess.";
@@ -36,9 +38,11 @@ export default function ExplorerPane({
   scope,
   onScope,
   error,
+  onRetry,
   onPlay,
   fen,
 }: Props) {
+  const [token, setToken] = useState("");
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -55,9 +59,30 @@ export default function ExplorerPane({
           ))}
         </div>
         <span className="ml-auto font-mono text-[11px] text-muted">
-          {total.toLocaleString()} games
+          {error ? "—" : total.toLocaleString()} games
         </span>
       </div>
+
+      {scope === "lichess_live" && (
+        <details className="rounded-lg border border-ivory/10 p-2 text-xs" open={Boolean(error)}>
+          <summary className="cursor-pointer">Connect Lichess</summary>
+          <p className="my-2 text-muted">
+            Live explorer requires a Lichess token. <a className="underline" href="https://lichess.org/account/oauth/token/create?description=ChessRabbit%20Explorer" target="_blank" rel="noreferrer">Create a personal API token</a> with no permissions selected.
+            It is kept only for this app session and sent to Lichess to fetch statistics.
+          </p>
+          <form className="space-y-2" onSubmit={(event) => {
+            event.preventDefault();
+            setLichessExplorerToken(token);
+            setToken("");
+            onRetry();
+          }}>
+            <input aria-label="Lichess personal API token" type="password" autoComplete="off" spellCheck={false} maxLength={512}
+              className="input" placeholder="Paste your Lichess token" value={token} onChange={(event) => setToken(event.target.value)} />
+            <button className="btn" disabled={!token.trim()} type="submit">Connect and retry</button>
+            <button className="btn ml-2" type="button" onClick={() => { setLichessExplorerToken(""); setToken(""); onRetry(); }}>Disconnect</button>
+          </form>
+        </details>
+      )}
 
       {moves.length === 0 ? (
         <p className="px-1 py-2 text-xs text-muted">{emptyText(scope, error)}</p>
@@ -100,6 +125,8 @@ export default function ExplorerPane({
           ))}
         </ul>
       )}
+
+      {error && <button className="btn text-xs" onClick={onRetry}>Retry explorer</button>}
 
       {/* The book says which moves were played from here. This asks the other
           half of the question — who was here, and what happened to them. It is

@@ -2,7 +2,7 @@
 
 ## Windows desktop app
 
-Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.1/ChessRabbit-Setup.exe), run it, and open ChessRabbit from the desktop or Start menu. The installer includes Stockfish and local storage. Desktop users do not need the development setup below.
+Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.2/ChessRabbit-Setup.exe), run it, and open ChessRabbit from the desktop or Start menu. The installer includes Stockfish and local storage. Desktop users do not need the development setup below.
 
 For Leela, use **Engines → Add Leela Chess Zero** in the app and select your `lc0.exe` and network file. Use **Engines → Add UCI engine** for another engine, then select it in Analysis settings. See [the desktop guide](DESKTOP.md) for Windows installation, engines, backups and troubleshooting.
 
@@ -115,4 +115,3 @@ If another application uses ports 3000, 8000, 5433 or 6380, free those ports fir
 ## Shared hosting
 
 Local mode is for personal localhost use. A shared/public installation must disable LOCAL_MODE, use a persistent strong JWT secret, normal account authentication, HTTPS, configured email and appropriate database/network access controls. See [Security](../SECURITY.md).
-

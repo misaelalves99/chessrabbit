@@ -4,8 +4,8 @@ Opponent preparation.
 Point it at an opponent's chess.com or Lichess account and it fetches their
 recent games, breaks down the openings they actually play with each colour,
 and can build a counter-repertoire: their most-played lines, with your
-replies taken from the master reference database (52k+ strong games) - i.e.
-how professionals answer exactly what your opponent likes to play.
+replies taken from the local master reference database when available.
+Fresh installations fall back to replies seen in the opponent's games.
 """
 
 from __future__ import annotations
@@ -79,6 +79,8 @@ def _aggregate(games: list[dict], username: str) -> tuple[dict, dict]:
 
     for g in games:
         white = (g.get("white") or "").lower()
+        if uname not in (white, (g.get("black") or "").lower()):
+            continue
         color = "white" if white == uname else "black"
         sans = _san_line(g["movetext"], LINE_PLIES)
         if len(sans) < 2:
@@ -159,7 +161,8 @@ async def build_prep_repertoire(
 
     Follows each of their most-played lines as the colour they'd have against
     you; at every one of YOUR turns the expected move is the most popular
-    master continuation from the reference database.
+    master continuation from the reference database, or the most common
+    reply in their downloaded games when the local book has no entry.
     """
     games = await _fetch_opponent(payload.platform, payload.username)
     if not games:
@@ -177,14 +180,17 @@ async def build_prep_repertoire(
     # Position-keyed, not sequence-keyed, so it survives our own moves
     # diverging from whatever their past opponents happened to play.
     posmap: dict[int, Counter] = {}
+    replies: dict[int, Counter] = {}
     uname = payload.username.lower()
     for g in games:
         white_name = (g.get("white") or "").lower()
+        if uname not in (white_name, (g.get("black") or "").lower()):
+            continue
         their_color = "white" if white_name == uname else "black"
         if their_color != opp_color:
             continue
         parsed = chess.pgn.read_game(io.StringIO(g["movetext"]))
-        if parsed is None:
+        if parsed is None or parsed.errors or parsed.board().fen() != chess.STARTING_FEN:
             continue
         board = parsed.board()
         for i, mv in enumerate(parsed.mainline_moves()):
@@ -192,6 +198,8 @@ async def build_prep_repertoire(
                 break
             if board.turn == (chess.WHITE if opp_white else chess.BLACK):
                 posmap.setdefault(zobrist_of(board.fen()), Counter())[board.san(mv)] += 1
+            else:
+                replies.setdefault(zobrist_of(board.fen()), Counter())[mv.uci()] += 1
             board.push(mv)
 
     if not posmap:
@@ -207,19 +215,26 @@ async def build_prep_repertoire(
             return
         my_turn = board.turn == (chess.WHITE if my_white else chess.BLACK)
         if my_turn:
+            key = zobrist_of(board.fen())
             reply = await _master_reply(db, board.fen())
+            source = "masters"
+            if reply is None and replies.get(key):
+                reply = replies[key].most_common(1)[0][0]
+                source = "opponent_games"
             if reply is None:
                 return
             try:
                 mv = chess.Move.from_uci(reply)
+                if mv not in board.legal_moves:
+                    return
                 san = board.san(mv)
             except (ValueError, AssertionError):
                 return
-            key = zobrist_of(board.fen())
             if key not in cards:
                 cards[key] = {
                     "fen": board.fen(), "zobrist": key,
                     "expected_uci": mv.uci(), "expected_san": san,
+                    "source": source,
                 }
             board.push(mv)
             await walk(board, depth + 1)
@@ -246,9 +261,11 @@ async def build_prep_repertoire(
             detail={"code": "no_prep", "message": "Could not build a prep line from their games"},
         )
 
+    sources = dict(Counter(c["source"] for c in cards.values()))
+    suffix = " (game-based)" if "opponent_games" in sources else ""
     rep = Repertoire(
         user_id=user.id,
-        name=f"🎯 Prep vs {payload.username}",
+        name=f"🎯 Prep vs {payload.username}{suffix}",
         color=payload.my_color,
     )
     db.add(rep)
@@ -270,4 +287,5 @@ async def build_prep_repertoire(
     return RepertoireOut(
         id=rep.id, name=rep.name, color=rep.color,
         card_count=len(cards), due_count=len(cards),
+        prep_sources=sources,
     )

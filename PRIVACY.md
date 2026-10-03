@@ -22,6 +22,8 @@ Local PGN analysis with the included Stockfish engine works after installation w
 
 Optional online features may contact third-party services when you choose to use them, including Lichess, Chess.com, opening explorers or external download sites for engines, neural-network files, tablebases and datasets. Those services have their own terms and privacy policies.
 
+Live explorer requires a Lichess personal API token with no permissions selected. ChessRabbit keeps the token in the current page's memory, forwards it through the local backend to Lichess over HTTPS, and does not save it in the database, browser storage or logs. Disconnecting or reloading the page clears it. Explorer requests share the board position with Lichess; cached statistics contain no token. In a self-hosted web deployment, the operator's backend also receives the token.
+
 ## Telemetry and tracking
 
 ChessRabbit does not intentionally include analytics, advertising trackers or telemetry in the desktop app. If you run a modified build or a build hosted by somebody else, that operator is responsible for explaining any additional tracking, hosting, access or retention practices.

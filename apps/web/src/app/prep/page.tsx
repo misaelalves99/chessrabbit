@@ -3,8 +3,7 @@
 /**
  * Opponent preparation. Enter who you're facing and where they
  * play; we pull their recent games, show what they actually open with, and
- * build a drillable counter-repertoire whose replies come from the master
- * reference database.
+ * build drills using the local master book or replies from those games.
  */
 
 import { useEffect, useState } from "react";
@@ -46,11 +45,14 @@ export default function PrepPage() {
   }
 
   async function buildPrep() {
+    if (!dossier) return;
     setBuilding(true);
     setError(null);
+    setBuilt(null);
     try {
-      const rep = await api.prepRepertoire(platform, username.trim(), myColor);
-      setBuilt(`${rep.name} — ${rep.card_count} positions ready to drill`);
+      const rep = await api.prepRepertoire(dossier.platform as Platform, dossier.username, myColor);
+      const gameBased = rep.prep_sources?.opponent_games ?? 0;
+      setBuilt(`${rep.name} — ${rep.card_count} positions ready to drill${gameBased ? `. ${gameBased} use replies from their games; review these with an engine before adopting them` : ""}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not build the prep");
     } finally {
@@ -93,7 +95,7 @@ export default function PrepPage() {
             </div>
             <button
               className="btn-primary"
-              disabled={!username.trim() || loading}
+              disabled={!username.trim() || loading || building}
               onClick={scout}
             >
               {loading ? "Scouting…" : "Scout"}
@@ -123,7 +125,8 @@ export default function PrepPage() {
                 <select
                   className="input w-28"
                   value={myColor}
-                  onChange={(e) => setMyColor(e.target.value as "white" | "black")}
+                  disabled={building}
+                  onChange={(e) => { setMyColor(e.target.value as "white" | "black"); setBuilt(null); }}
                 >
                   <option value="white">White</option>
                   <option value="black">Black</option>
@@ -139,8 +142,9 @@ export default function PrepPage() {
                 )}
               </div>
               <p className="text-xs text-muted">
-                Replies in the drill come from the master reference database —
-                how 2200+ players answer the exact lines this opponent plays.
+                Replies use your local master database when available. Otherwise, drills
+                use the most common replies in this opponent&apos;s games. These game-based
+                replies are practice material, not engine recommendations.
               </p>
             </div>
           )}

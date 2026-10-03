@@ -27,14 +27,14 @@ router = APIRouter(tags=["explorer"])
 EXPLORER_TTL = 86400
 
 
-async def _lichess_live(fen: str) -> ExplorerOut:
+async def _lichess_live(fen: str, token: str | None = None) -> ExplorerOut:
     """Map Lichess's live masters response to our ExplorerOut shape."""
     try:
-        data = await masters_moves(fen)
+        data = await masters_moves(fen, token)
     except ExplorerUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "explorer_unavailable", "message": str(exc)},
+            detail={"code": exc.code, "message": str(exc)},
         )
 
     moves: list[ExplorerMove] = []
@@ -84,7 +84,7 @@ async def explorer(
         )
 
     if payload.scope == "lichess_live":
-        return await _lichess_live(payload.fen)
+        return await _lichess_live(payload.fen, payload.lichess_token.get_secret_value() if payload.lichess_token else None)
 
     zob = zobrist_of(payload.fen)
 

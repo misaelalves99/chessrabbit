@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, SecretStr
 
 # ---------- auth ----------
 
@@ -197,6 +197,7 @@ class ExplorerRequest(BaseModel):
     fen: str = Field(max_length=200)
     min_elo: int | None = Field(default=None, ge=0, le=3500)
     scope: str = Field(default="reference", pattern="^(reference|mine|lichess_live)$")
+    lichess_token: SecretStr | None = None
 
 
 class ExplorerMove(BaseModel):
@@ -388,6 +389,7 @@ class RepertoireOut(BaseModel):
     color: str
     card_count: int = 0
     due_count: int = 0
+    prep_sources: dict[str, int] | None = None
 
     class Config:
         from_attributes = True

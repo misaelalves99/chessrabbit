@@ -17,6 +17,12 @@ The app is free, GPL-3.0 open source, with optional [donations](https://buymeaco
 
 Stockfish analysis works immediately after installation. Leela Chess Zero, neural-network files, Syzygy tablebases and large reference datasets are optional separate downloads.
 
+## Live explorer and opponent preparation
+
+In the board's **Live** explorer tab, expand **Connect Lichess**. Create a personal API token at https://lichess.org/account/oauth/token/create with no permissions selected, paste it into ChessRabbit, and click **Connect and retry**. Lichess now requires authentication for explorer statistics. The token stays only in the current page's memory; reconnect after reloading or restarting. **Disconnect** clears it. Do not share your token in an issue or screenshot.
+
+Opponent prep works without a local master database. It uses local master replies when available and otherwise creates clearly labeled game-based drills from replies in the opponent's downloaded games. These are not engine recommendations; review them with Stockfish or Leela before adopting them. Scouting and fetching games require internet access.
+
 ## Engines
 
 - **Stockfish:** included and selected by default.

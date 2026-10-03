@@ -4,7 +4,7 @@ Free desktop chess analysis and training for Windows. ChessRabbit runs on your c
 
 ![ChessRabbit preview](docs/assets/chessrabbit-social-preview.svg)
 
-[Download ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.1/ChessRabbit-Setup.exe) · [Read the desktop guide](docs/DESKTOP.md) · [Support the project](https://buymeacoffee.com/shivamjg101)
+[Download ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.2/ChessRabbit-Setup.exe) · [Read the desktop guide](docs/DESKTOP.md) · [Support the project](https://buymeacoffee.com/shivamjg101)
 
 If ChessRabbit helps your training, please star this repo so more chess players can find it.
 
@@ -18,7 +18,7 @@ If ChessRabbit helps your training, please star this repo so more chess players 
 
 ## Install on Windows
 
-Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.1/ChessRabbit-Setup.exe), run it, and open **ChessRabbit** from the desktop or Start menu. Windows 10/11 x64 is supported.
+Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.2/ChessRabbit-Setup.exe), run it, and open **ChessRabbit** from the desktop or Start menu. Windows 10/11 x64 is supported.
 
 Use **Engines → Add Leela Chess Zero** to select your local `lc0.exe` and network, or **Add UCI engine** for another engine. Then choose it in Analysis settings. See the [desktop guide](docs/DESKTOP.md) for data, engines, backups and building the installer. If Windows warns on download, see [Windows security notes](docs/WINDOWS_SECURITY.md).
 
