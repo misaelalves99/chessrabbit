@@ -2,7 +2,7 @@ name: Windows desktop installer
 
 on:
   push:
-    branches: ['codex/open-source-local-engines']
+    branches: ['main', 'codex/open-source-local-engines']
     paths:
       - 'apps/desktop/**'
       - 'apps/api/**'
@@ -12,6 +12,10 @@ on:
       - '.github/workflows/desktop.yml'
       - 'LICENSE'
       - 'THIRD_PARTY_NOTICES.md'
+      - 'LEGAL.md'
+      - 'PRIVACY.md'
+      - 'SECURITY.md'
+      - 'docs/WINDOWS_SECURITY.md'
   workflow_dispatch:
 
 concurrency:
@@ -67,6 +71,19 @@ jobs:
             $orphans = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installDirectory, [StringComparison]::OrdinalIgnoreCase) }
             if ($orphans) { throw 'Installed app left a background process running' }
           }
+      - name: Microsoft Defender scan release files
+        run: |
+          if (Get-Command Start-MpScan -ErrorAction SilentlyContinue) {
+            Start-MpScan -ScanPath "$PWD\dist\windows\ChessRabbit-Setup.exe" -ScanType CustomScan
+            Start-MpScan -ScanPath "$PWD\dist\windows\win-unpacked" -ScanType CustomScan
+            $recent = Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -gt (Get-Date).AddHours(-2) }
+            if ($recent) {
+              $recent | Format-List | Out-String | Write-Host
+              throw 'Microsoft Defender reported a threat in the release output.'
+            }
+          } else {
+            Write-Host 'Microsoft Defender PowerShell cmdlets are unavailable on this runner.'
+          }
       - name: Package corresponding source and notices
         run: |
           git archive --format=zip HEAD -o dist/windows/ChessRabbit-Source.zip
@@ -93,13 +110,13 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             Write-Host 'This version is already published. Bump apps/desktop/package.json to publish a new version.'
           } else {
-            $notes = @'
-          Install ChessRabbit-Setup.exe on Windows 10/11 x64, then open ChessRabbit from your desktop or Start menu. Stockfish 19 and local storage are included. No Docker or development tools are needed.
-
-          Use Engines → Add Leela Chess Zero to select lc0.exe and its network, or add another local UCI engine. All features are free; donations are optional.
-
-          This prerelease installer is unsigned. ChessRabbit source and build scripts, the unmodified upstream Stockfish archive, and SHA-256 checksums are attached. Stockfish source and notices are also included in the installed application.
-          '@
+            $notes = @(
+              'Install ChessRabbit-Setup.exe on Windows 10/11 x64, then open ChessRabbit from your desktop or Start menu. Stockfish 19 and local storage are included. No Docker or development tools are needed.',
+              '',
+              'Use Engines → Add Leela Chess Zero to select lc0.exe and its network, or add another local UCI engine. All features are free; donations are optional.',
+              '',
+              'This prerelease installer may show a SmartScreen reputation warning until code signing is configured. The release workflow scans the installer with Microsoft Defender before publication. ChessRabbit source and build scripts, the unmodified upstream Stockfish archive, and SHA-256 checksums are attached. Stockfish source and notices are also included in the installed application.'
+            ) -join [Environment]::NewLine
             $notes | Set-Content release-notes.md -Encoding utf8
             gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "ChessRabbit $($tag.Substring(9)) for Windows" --prerelease --notes-file release-notes.md dist/windows/ChessRabbit-Setup.exe dist/windows/ChessRabbit-Source.zip dist/windows/Stockfish-19-Upstream.zip dist/windows/SHA256SUMS.txt
             if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
