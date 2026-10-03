@@ -37,6 +37,7 @@ What it does:
 
 - Installs with a normal setup.exe
 - Runs locally on your PC
+- Supports Windows 10/11 on 64-bit Intel/AMD PCs
 - Stores games and analysis in a local database
 - Includes Stockfish 19
 - Supports Leela Chess Zero and custom UCI engines
