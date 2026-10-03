@@ -3,7 +3,7 @@ import SiteFooter from "@/components/SiteFooter";
 import DonateSection from "@/components/DonateSection";
 
 const SOURCE = "https://github.com/shivamjg101/chessrabbit/tree/codex/open-source-local-engines";
-const INSTALLER = "https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.0/ChessRabbit-Setup.exe";
+const INSTALLER = "https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.1/ChessRabbit-Setup.exe";
 
 export default function DownloadPage() {
   return <div className="mx-auto min-h-screen max-w-3xl px-4 py-10">
