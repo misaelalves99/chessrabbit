@@ -1,0 +1,40 @@
+name: Engine or setup help
+description: Get help with installation, Stockfish, Leela, or another UCI engine.
+title: "[Help]: "
+labels: ["help wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when ChessRabbit installs but setup, Stockfish, Leela, or another UCI engine is not working as expected.
+  - type: dropdown
+    id: topic
+    attributes:
+      label: What do you need help with?
+      options:
+        - Windows installation
+        - Stockfish analysis
+        - Leela Chess Zero
+        - Custom UCI engine
+        - Docker / self-hosting
+        - Data or backups
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: "Windows 11 x64, CPU/GPU, RAM"
+  - type: textarea
+    id: details
+    attributes:
+      label: What did you try?
+      placeholder: "I installed the app, opened Engines, selected..."
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error message or screenshot
+      render: text

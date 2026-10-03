@@ -1,0 +1,17 @@
+title: "[Idea]: "
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What would make ChessRabbit more useful?
+      placeholder: "I would like ChessRabbit to..."
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: How would you use this in your chess study or analysis workflow?
+    validations:
+      required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/shivamjg101/chessrabbit/discussions
+    about: Use Discussions for questions, ideas, setup conversations, and community support.
+  - name: Support ChessRabbit
+    url: https://buymeacoffee.com/shivamjg101
+    about: Support ongoing work on ChessRabbit.
