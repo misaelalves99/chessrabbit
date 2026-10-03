@@ -1,12 +1,35 @@
-# ChessRabbit Community
+# ChessRabbit
 
-Free, open-source chess analysis, game storage, opening study and training. Run it on your own computer with Stockfish, Leela Chess Zero (Lc0), or another UCI engine.
+Free desktop chess analysis and training for Windows. ChessRabbit runs on your computer, stores your games locally, and works with Stockfish, Leela Chess Zero (Lc0), or another UCI engine.
+
+![ChessRabbit preview](docs/assets/chessrabbit-social-preview.svg)
+
+[Download ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.0/ChessRabbit-Setup.exe) · [Read the desktop guide](docs/DESKTOP.md) · [Support the project](https://buymeacoffee.com/shivamjg101)
+
+If ChessRabbit helps your training, please star this repo so more chess players can find it.
+
+## Why Players Try It
+
+- One Windows installer. No Docker, Node.js, Python, database setup or account registration.
+- Local game database in `%APPDATA%/ChessRabbit/local`.
+- Stockfish 19 included, with support for Leela Chess Zero and custom UCI engines.
+- PGN import, game review, move annotations, studies, opening work and training tools.
+- Free features for everyone. No paid plans, subscription checks or license keys.
 
 ## Install on Windows
 
-Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.0/ChessRabbit-Setup.exe), run it, and open **ChessRabbit** from the desktop or Start menu. Windows 10/11 x64 is supported. The installer bundles the app, Stockfish 19 and local storage. No Docker, Python, Node.js, database setup or account registration is required.
+Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/releases/download/desktop-v0.1.0/ChessRabbit-Setup.exe), run it, and open **ChessRabbit** from the desktop or Start menu. Windows 10/11 x64 is supported.
 
 Use **Engines → Add Leela Chess Zero** to select your local `lc0.exe` and network, or **Add UCI engine** for another engine. Then choose it in Analysis settings. See the [desktop guide](docs/DESKTOP.md) for data, engines, backups and building the installer.
+
+## Release Files
+
+The current release includes:
+
+- `ChessRabbit-Setup.exe` - Windows installer.
+- `ChessRabbit-Source.zip` - corresponding source archive.
+- `Stockfish-19-Upstream.zip` - upstream Stockfish source package for GPL compliance.
+- `SHA256SUMS.txt` - checksums for release verification.
 
 ## About Me
 
@@ -42,6 +65,13 @@ To stop the app and keep your data: `docker compose down`.
 Every feature is available to every account. Resource limits apply equally to protect the machine running the app. There are no paid plans, billing routes, subscription checks or license keys.
 
 Your desktop games and results are stored in `%APPDATA%/ChessRabbit/local`. Docker deployments use local volumes. A new install starts with an empty personal/reference database. Reference games, puzzles, neural networks and Syzygy tablebases are optional datasets installed separately.
+
+## Community
+
+- Ask setup questions and share ideas in [Discussions](https://github.com/shivamjg101/chessrabbit/discussions).
+- Report reproducible bugs with the issue templates.
+- See the [roadmap](ROADMAP.md) for near-term work.
+- Use the [launch kit](docs/LAUNCH_KIT.md) if you want to share ChessRabbit with other chess players.
 
 ## Project layout
 
