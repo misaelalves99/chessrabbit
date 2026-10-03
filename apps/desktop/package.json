@@ -1,6 +1,6 @@
 {
   "name": "chessrabbit-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Free, open-source chess analysis and training on your computer",
   "author": "shivamjg101",
   "license": "GPL-3.0",
@@ -33,7 +33,7 @@
       { "from": "../web/src/app/fonts", "to": "licenses/fonts", "filter": ["*.txt", "*.md"] }
     ],
     "electronLanguages": ["en-US"],
-    "win": { "target": "nsis", "signExecutable": false },
+    "win": { "target": "nsis", "publisherName": "Shivam Jaiswal", "requestedExecutionLevel": "asInvoker" },
     "nsis": {
       "artifactName": "ChessRabbit-Setup.exe",
       "oneClick": false,
