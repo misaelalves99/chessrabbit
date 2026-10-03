@@ -52,7 +52,7 @@ The current release includes:
 
 ## About Me
 
-ChessRabbit is built by [Shivam Jaiswal](https://github.com/shivamjg101), a full-stack developer focused on practical chess tools, local-first software and AI-assisted workflows. I created ChessRabbit so players can analyze games on their own computer with strong engines, keep their data locally and use every feature without paid plans.
+ChessRabbit is built by [shivamjg101](https://github.com/shivamjg101), a developer focused on practical chess tools, local-first software and AI-assisted workflows. ChessRabbit helps players analyze games on their own computer with strong engines, keep their data locally and use every feature without paid plans.
 
 If ChessRabbit helps your training, you can support the project at [buymeacoffee.com/shivamjg101](https://buymeacoffee.com/shivamjg101).
 
