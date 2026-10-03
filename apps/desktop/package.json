@@ -26,6 +26,10 @@
       { "from": "../../db/migrations", "to": "migrations" },
       { "from": "../../LICENSE", "to": "licenses/LICENSE" },
       { "from": "../../THIRD_PARTY_NOTICES.md", "to": "licenses/THIRD_PARTY_NOTICES.md" },
+      { "from": "../../PRIVACY.md", "to": "licenses/PRIVACY.md" },
+      { "from": "../../SECURITY.md", "to": "licenses/SECURITY.md" },
+      { "from": "../../LEGAL.md", "to": "licenses/LEGAL.md" },
+      { "from": "../../CONTRIBUTING.md", "to": "licenses/CONTRIBUTING.md" },
       { "from": "../web/src/app/fonts", "to": "licenses/fonts", "filter": ["*.txt", "*.md"] }
     ],
     "electronLanguages": ["en-US"],
