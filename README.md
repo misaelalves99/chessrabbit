@@ -22,6 +22,19 @@ Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/rele
 
 Use **Engines → Add Leela Chess Zero** to select your local `lc0.exe` and network, or **Add UCI engine** for another engine. Then choose it in Analysis settings. See the [desktop guide](docs/DESKTOP.md) for data, engines, backups and building the installer.
 
+## System Requirements
+
+| Requirement | Minimum | Recommended |
+| --- | --- | --- |
+| Operating system | Windows 10 or Windows 11 | Windows 11 |
+| CPU | 64-bit Intel or AMD processor | 4+ CPU cores for faster analysis |
+| Memory | 4 GB RAM | 8 GB+ RAM, especially for deeper analysis |
+| Storage | 1 GB free space for the app | 3 GB+ free space for games, logs and future updates |
+| Internet | Required for download and online imports | Optional after install for local PGN analysis |
+| Graphics | Any standard Windows display | Dedicated GPU only if you plan to run GPU Leela |
+
+ChessRabbit includes Stockfish, so no separate chess engine is required for basic analysis. Leela Chess Zero, neural-network files, Syzygy tablebases and large reference datasets are optional separate downloads.
+
 ## Release Files
 
 The current release includes:
