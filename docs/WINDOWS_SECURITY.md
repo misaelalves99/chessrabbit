@@ -25,7 +25,7 @@ Before publishing or promoting a Windows installer:
 
 ## Code signing
 
-Code signing is the best long-term fix for SmartScreen reputation. For GitHub Actions, configure Electron Builder signing with secure repository or environment secrets such as `CSC_LINK` and `CSC_KEY_PASSWORD`, or use a certificate stored on a secure signing service. Never commit a certificate or password to the repository.
+Code signing identifies the publisher; it does not guarantee that Windows will stop showing warnings. The build workflow passes the optional repository secrets `CSC_LINK` and `CSC_KEY_PASSWORD` to Electron Builder. Configure them with a trusted signing certificate when available, or integrate a secure signing service. Builds without signing credentials remain unsigned. Never commit a certificate or password to the repository.
 
 After signing, verify the release on Windows:
 
@@ -35,6 +35,8 @@ Get-FileHash .\dist\windows\ChessRabbit-Setup.exe -Algorithm SHA256
 ```
 
 ## Microsoft false-positive submission
+
+The release workflow updates Defender signatures and scans both the installer and unpacked app before running installation tests. A missing scanner, failed scan or detection blocks publication and artifact upload. It uses Microsoft's [documented custom scan mode](https://learn.microsoft.com/en-us/defender-endpoint/command-line-arguments-microsoft-defender-antivirus) to inspect archives and ignore file exclusions. Passing this scan is evidence for that build and signature version, not a guarantee against all threats or future detections.
 
 If Defender detects the installer or app as malware and you believe it is a false positive, submit the exact file to Microsoft Security Intelligence:
 

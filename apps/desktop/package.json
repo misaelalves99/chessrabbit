@@ -33,7 +33,7 @@
       { "from": "../web/src/app/fonts", "to": "licenses/fonts", "filter": ["*.txt", "*.md"] }
     ],
     "electronLanguages": ["en-US"],
-    "win": { "target": "nsis", "publisherName": "Shivam Jaiswal", "requestedExecutionLevel": "asInvoker" },
+    "win": { "target": "nsis", "requestedExecutionLevel": "asInvoker" },
     "nsis": {
       "artifactName": "ChessRabbit-Setup.exe",
       "oneClick": false,

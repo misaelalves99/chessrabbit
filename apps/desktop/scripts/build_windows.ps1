@@ -21,7 +21,9 @@ try {
         } finally { Pop-Location }
     }
     Invoke-Checked {
-        & $Python -m PyInstaller --noconfirm --clean --noupx --noconsole --onedir --name ChessRabbitBackend `
+        # Keep standard streams for readiness, logging and parent-exit detection.
+        # Electron's windowsHide option prevents a console window at launch.
+        & $Python -m PyInstaller --noconfirm --clean --noupx --onedir --name ChessRabbitBackend `
             --distpath dist/desktop-backend --workpath .test-cache/pyinstaller --specpath .test-cache `
             --paths apps/api --paths services/engine --paths apps/desktop/backend `
             --collect-submodules app --collect-all fakeredis --collect-all asyncpg `
