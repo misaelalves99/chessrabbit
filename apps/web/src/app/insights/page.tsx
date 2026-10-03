@@ -5,20 +5,20 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ApiError, Insights, InsightsRange, InsightsSource, OtbPlayer, TimeClass, api,
-  getAccessToken,
 } from "@/lib/api";
 import {
   CalendarSection, GamesSection, MovesSection, OpeningsSection,
   PhasesSection, ResultsSection,
 } from "@/components/InsightsSections";
+import { findings } from "@/lib/findings";
 
 const SECTIONS = [
-  { id: "games", label: "Games", icon: "♟", hint: "How are the games going?" },
-  { id: "results", label: "Results", icon: "🏁", hint: "How do they end?" },
-  { id: "phases", label: "Phases & shapes", icon: "◱", hint: "Where are they decided?" },
-  { id: "openings", label: "Openings", icon: "📖", hint: "What gets played, and how does it go?" },
-  { id: "moves", label: "Moves", icon: "◇", hint: "Where do the strengths lie?" },
-  { id: "calendar", label: "Calendar", icon: "🗓", hint: "When are the best results?" },
+  { id: "games", label: "Games", hint: "How are the games going?" },
+  { id: "results", label: "Results", hint: "How do they end?" },
+  { id: "phases", label: "Phases & shapes", hint: "Where are they decided?" },
+  { id: "openings", label: "Openings", hint: "What gets played, and how does it go?" },
+  { id: "moves", label: "Moves", hint: "Where do the strengths lie?" },
+  { id: "calendar", label: "Calendar", hint: "When are the best results?" },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -53,6 +53,74 @@ const SOURCES: { id: InsightsSource; label: string; hint: string }[] = [
 /** Who the page is about: the signed-in user, or somebody looked up. */
 type Subject = { kind: "me" } | { kind: "player"; source: InsightsSource; name: string };
 
+/**
+ * The findings, across the top, each one a link into the chart it came from.
+ *
+ * Deliberately silent when nothing clears its evidence threshold: a band of
+ * three cards that always fills itself would be filled with noise on the day a
+ * player has forty games, and after that nobody would believe the day it says
+ * something real. See lib/findings.ts.
+ */
+function FindingsBand({
+  data,
+  onJump,
+}: {
+  data: Insights;
+  onJump: (s: SectionId) => void;
+}) {
+  const found = findings(data);
+  if (found.length === 0) return null;
+
+  /* The column count follows the findings, because the findings are allowed to
+     number fewer than three — a fixed three-column grid left an empty cell
+     sitting on the divider colour, which reads as a card that failed to load
+     rather than as a finding that was never claimed. */
+  const cols =
+    found.length === 1
+      ? "grid-cols-1"
+      : found.length === 2
+        ? "sm:grid-cols-2"
+        : "sm:grid-cols-2 lg:grid-cols-3";
+
+  return (
+    <section className="border-b border-ivory/[0.07] bg-panelAlt/25">
+      <div className="mx-auto max-w-6xl px-3 py-4">
+        <p className="rule-label mb-3">What your games say</p>
+        <div className={`grid gap-px overflow-hidden rounded-md bg-line/40 ${cols}`}>
+          {/* Severity is a stripe, not the headline colour. Three coral
+              headlines in a row shout at each other, and coral in this app
+              means a move that lost — a diagnosis is not a verdict. The stripe
+              carries the tone and the words stay in chalk, which is also the
+              same device the verdict plate on /app uses. */}
+          {found.map((f) => (
+            <button
+              key={f.kind}
+              onClick={() => onJump(f.section)}
+              className="bg-night p-3 pl-4 text-left transition-colors hover:bg-panelAlt/60"
+              style={{
+                borderLeft: `3px solid ${f.tone === "bad" ? "#F2604E" : "#3FBFA3"}`,
+              }}
+            >
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-faint">
+                {f.kind}
+              </span>
+              <p className="mt-1 text-[15px] font-semibold leading-tight text-ink">
+                {f.headline}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted">{f.detail}</p>
+              {/* Always visible: a hover-only affordance tells a touch user
+                  nothing, and these are the band's whole point. */}
+              <span className="mt-1.5 inline-block text-[11px] text-brassLit">
+                See the chart →
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function InsightsPage() {
   const router = useRouter();
   const [data, setData] = useState<Insights | null>(null);
@@ -65,9 +133,6 @@ export default function InsightsPage() {
   const [color, setColor] = useState<"all" | "w" | "b">("all");
 
   const [subject, setSubject] = useState<Subject>({ kind: "me" });
-  // Looking someone up is a Master feature; a 402 becomes an upsell rather
-  // than a red error, since it is a price tag and not a failure.
-  const [locked, setLocked] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -85,17 +150,10 @@ export default function InsightsPage() {
       .then((res) => {
         setData(res);
         setError(null);
-        setLocked(false);
-      })
+          })
       .catch((err) => {
         setData(null);
-        if (err instanceof ApiError && err.code === "upgrade_required") {
-          setLocked(true);
-          setError(null);
-          return;
-        }
-        setLocked(false);
-        setError(
+            setError(
           err instanceof ApiError
             ? err.message
             : subject.kind === "me"
@@ -107,11 +165,7 @@ export default function InsightsPage() {
   }, [timeClass, range, color, subject]);
 
   useEffect(() => {
-    if (!getAccessToken()) {
-      router.push("/login");
-      return;
-    }
-    load();
+    api.me().then(load).catch(() => router.push("/login"));
   }, [router, load]);
 
   const body = () => {
@@ -131,15 +185,12 @@ export default function InsightsPage() {
   return (
     <div className="min-h-dvh">
       {/* ---------- Header ---------- */}
-      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-white/[0.07] bg-panel/70 px-3 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-ivory/[0.07] bg-panel/70 px-3 backdrop-blur-xl">
         <Link href="/app" className="btn px-2" aria-label="Back to the board">
           ←
         </Link>
-        <span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent2 text-base shadow-glow">
-          💡
-        </span>
         <div className="min-w-0">
-          <h1 className="font-display text-lg font-bold leading-none">
+          <h1 className="font-display text-xl leading-none">
             {subject.kind === "me" ? "Insights" : subject.name}
           </h1>
           <p className="truncate text-[11px] text-muted">
@@ -172,8 +223,13 @@ export default function InsightsPage() {
         </nav>
       </header>
 
-      {/* ---------- Filters ---------- */}
-      <div className="sticky top-14 z-30 border-b border-white/[0.07] bg-panel/60 px-3 py-2.5 backdrop-blur-xl">
+      {/* ---------- Filters ----------
+
+          Not sticky. Two stacked sticky bars took 132px off the top of every
+          screen before a single chart appeared, which on a phone is a fifth of
+          the viewport spent on controls you set once and then leave alone. The
+          header stays pinned; the filters scroll away with the page. */}
+      <div className="border-b border-ivory/[0.07] bg-panel/40 px-3 py-2.5">
         <div className="mx-auto max-w-6xl space-y-2">
           <SubjectPicker subject={subject} onChange={setSubject} />
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -189,29 +245,39 @@ export default function InsightsPage() {
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-6xl flex-col gap-5 px-3 py-5 lg:flex-row-reverse">
+      {/* ---------- What the games say ----------
+
+          The page's actual question, answered before the charts rather than
+          left for the reader to work out by scanning six of them. */}
+      {data && <FindingsBand data={data} onJump={setSection} />}
+
+      {/* Rail first in the source and on the left at desktop width: it is this
+          page's primary navigation, and it used to sit on the right where it
+          was read last. */}
+      <div className="mx-auto flex max-w-6xl flex-col gap-5 px-3 py-5 lg:flex-row">
         {/* ---------- Section rail ---------- */}
-        <aside className="lg:sticky lg:top-32 lg:h-fit lg:w-56 lg:shrink-0">
+        <aside className="lg:sticky lg:top-16 lg:h-fit lg:w-52 lg:shrink-0">
           <nav className="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
             {SECTIONS.map((s) => (
               <button
                 key={s.id}
                 onClick={() => setSection(s.id)}
                 aria-current={section === s.id ? "page" : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors lg:w-full ${
+                /* Brass, not verdigris: choosing a section is navigation, and
+                   verdigris in this app only ever means "you got it right". */
+                className={`flex shrink-0 items-center gap-2 rounded px-3 py-2 text-left text-sm transition-colors lg:w-full ${
                   section === s.id
-                    ? "bg-accent/15 text-accent ring-1 ring-accent/40"
-                    : "text-muted hover:bg-white/[0.06] hover:text-ink"
+                    ? "bg-brass/15 text-brassLit ring-1 ring-brass/40"
+                    : "text-muted hover:bg-ivory/[0.06] hover:text-ink"
                 }`}
               >
-                <span aria-hidden className="text-base leading-none">{s.icon}</span>
                 {s.label}
               </button>
             ))}
           </nav>
 
           {data && (
-            <div className="mt-3 hidden rounded-xl border border-white/[0.06] bg-panelAlt/50 p-3 text-[11px] leading-relaxed text-muted lg:block">
+            <div className="mt-3 hidden rounded-xl border border-ivory/[0.06] bg-panelAlt/50 p-3 text-[11px] leading-relaxed text-muted lg:block">
               {data.engine_metrics === false ? (
                 <p>
                   Built from{" "}
@@ -247,7 +313,7 @@ export default function InsightsPage() {
         {/* ---------- Body ---------- */}
         <main className="min-w-0 flex-1">
           <div className="mb-3">
-            <h2 className="font-display text-xl font-bold">{current.label}</h2>
+            <h2 className="font-display text-xl">{current.label}</h2>
             <p className="text-sm text-muted">{current.hint}</p>
           </div>
 
@@ -272,33 +338,11 @@ export default function InsightsPage() {
             </div>
           )}
 
-          {locked && !loading && (
-            <div className="card p-6 text-center">
-              <p className="font-display text-lg font-semibold">
-                Looking up other players is a Master feature
-              </p>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-                Master unlocks insights for any Lichess or Chess.com account, and
-                the over-the-board careers of players in the reference database.
-                Your own insights stay free.
-              </p>
-              <div className="mt-4 flex justify-center gap-2">
-                <Link href="/pricing" className="btn-primary text-sm">
-                  See plans
-                </Link>
-                <button
-                  className="btn text-sm"
-                  onClick={() => setSubject({ kind: "me" })}
-                >
-                  Back to mine
-                </button>
-              </div>
-            </div>
-          )}
+
 
           {data && data.games === 0 && !loading && (
             <div className="card p-6 text-center">
-              <p className="font-display text-lg font-semibold">Nothing to show yet</p>
+              <p className="font-display text-lg">Nothing to show yet</p>
               {subject.kind === "me" ? (
                 <>
                   <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
@@ -427,7 +471,7 @@ function SubjectPicker({
                 {matches.map((m) => (
                   <li key={m.name}>
                     <button
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/[0.06]"
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-ivory/[0.06]"
                       onClick={() => {
                         setText(m.name);
                         submit(m.name);

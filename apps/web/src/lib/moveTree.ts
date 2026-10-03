@@ -53,20 +53,37 @@ export interface MoveTree {
 
 export const ROOT: NodeId = 0;
 
-const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 /* ------------------------------------------------------------------ *
  * Construction
  * ------------------------------------------------------------------ */
 
+/**
+ * A tree standing on `startFen` - the opening array unless a study chapter or
+ * a `[FEN]` header says otherwise.
+ *
+ * The position is put through chess.js before it is kept, for two reasons.
+ * `addMove` builds a board from its parent's FEN outside any try block, so an
+ * unparseable root would not fail here, it would throw on the first move
+ * played from it. And a position written by hand ("...w KQkq -") is legal
+ * shorthand that every later string comparison against a full FEN would miss.
+ */
 export function createTree(startFen: string = START_FEN): MoveTree {
+  let fen = START_FEN;
+  try {
+    fen = new Chess(startFen).fen();
+  } catch {
+    /* not a position: stand on the initial array rather than on nothing */
+  }
+
   const root: MoveNode = {
     id: ROOT,
     parent: null,
     children: [],
     san: "",
     uci: "",
-    fen: startFen,
+    fen,
     ply: -1,
     mainline: true,
     depth: 0,

@@ -103,3 +103,77 @@ describe("writing", () => {
     expect(body(toPgn(parsePgn(``).tree))).toBe(`*`);
   });
 });
+
+/**
+ * A study chapter says something about the position before anything is played
+ * — its introduction, and the arrows drawn over the opening array. PGN puts
+ * that in a comment ahead of the first move.
+ */
+describe("the starting position's own comment", () => {
+  it("reads a comment before the first move onto the root", () => {
+    const { tree } = parsePgn(`{how this line goes} 1. e4 e5`);
+    expect(nodeAt(tree, tree.root)!.comment).toBe("how this line goes");
+    expect(sans(`{how this line goes} 1. e4 e5`)).toEqual(["e4", "e5"]);
+  });
+
+  it("writes it back ahead of the moves", () => {
+    expect(roundTrip(`{intro} 1. e4 e5`)).toBe(`{intro} 1. e4 e5 *`);
+  });
+
+  it("keeps one on a chapter with no moves in it yet", () => {
+    expect(roundTrip(`{an empty board and a plan}`)).toBe(`{an empty board and a plan} *`);
+  });
+
+  // Between `(` and the variation's first move the cursor sits on the root.
+  // A comment written there is about that line, and must not be hoisted into
+  // the game's introduction.
+  it("does not mistake a variation's opening comment for the root's", () => {
+    const { tree } = parsePgn(`1. e4 e5 2. Nf3 ({the other way} 2. Bc4 Nf6) 2... Nc6`);
+    expect(nodeAt(tree, tree.root)!.comment).toBeUndefined();
+  });
+});
+
+/**
+ * A study chapter can start from a diagram rather than the opening array. The
+ * position travels in the headers, and the move numbers have to follow it -
+ * numbering an endgame from 1 is the tell that the tree's own ply leaked out.
+ */
+describe("chapters that start from a position", () => {
+  const rook = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 41";
+  const blackFirst = "4k3/8/8/8/8/8/4P3/4K3 b - - 0 41";
+
+  it("stands the tree on the FEN header", () => {
+    const { tree } = parsePgn(`[SetUp "1"]\n[FEN "${rook}"]\n\n41. e4`);
+    expect(nodeAt(tree, tree.root)!.fen).toBe(rook);
+    expect(mainlinePath(tree).map((n) => n.san)).toEqual(["e4"]);
+  });
+
+  it("numbers from the position, not from the root", () => {
+    expect(roundTrip(`[SetUp "1"]\n[FEN "${rook}"]\n\n41. e4 Kd7`)).toBe(`41. e4 Kd7 *`);
+  });
+
+  it("keeps Black-to-move numbering", () => {
+    expect(roundTrip(`[SetUp "1"]\n[FEN "${blackFirst}"]\n\n41... Kd7 42. e4`)).toBe(
+      `41... Kd7 42. e4 *`
+    );
+  });
+
+  it("writes the SetUp/FEN pair back out", () => {
+    const out = toPgn(parsePgn(`[SetUp "1"]\n[FEN "${rook}"]\n\n41. e4`).tree);
+    expect(out).toContain(`[SetUp "1"]`);
+    expect(out).toContain(`[FEN "${rook}"]`);
+  });
+
+  // The moves were played on the board the tree holds. A FEN tag carried in
+  // from somewhere else must not be allowed to say they were played elsewhere.
+  it("drops a FEN header that the tree does not stand on", () => {
+    const out = toPgn(parsePgn(`1. e4 e5`).tree, { FEN: rook, SetUp: "1" });
+    expect(out).not.toContain("[FEN");
+    expect(out).not.toContain("[SetUp");
+  });
+
+  it("falls back to the opening array when the FEN is nonsense", () => {
+    const { tree } = parsePgn(`[FEN "not a position"]\n\n1. e4`);
+    expect(mainlinePath(tree).map((n) => n.san)).toEqual(["e4"]);
+  });
+});

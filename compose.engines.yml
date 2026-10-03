@@ -1,0 +1,4 @@
+services:
+  engine:
+    environment:
+      ENGINES_CONFIG: /engines/engines.json

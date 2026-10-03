@@ -18,8 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.chess_utils import validate_fen
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.engines import resolve_engine
+from app.core.ratelimit import user_rate_limit
 from app.core.redis_client import get_redis
-from app.core.tiers import is_paid
 from app.models import AnalysisJob, User
 from app.schemas import PlayMoveIn, PlayMoveOut
 
@@ -56,7 +57,16 @@ async def _await_move(pubsub) -> str | None:
     return None
 
 
-@router.post("/move", response_model=PlayMoveOut)
+# Every call holds an engine for up to 1.2s of search, so this endpoint is the
+# cheapest way to burn the pool. Counted per account rather than per IP: a
+# household or a school behind one address are separate players, and the engine
+# time is charged to whoever's logged in. A real game needs roughly one move
+# per second at bullet pace; 90/min leaves headroom without leaving it open.
+@router.post(
+    "/move",
+    response_model=PlayMoveOut,
+    dependencies=[user_rate_limit("play_move", limit=90, window_s=60)],
+)
 async def play_move(
     payload: PlayMoveIn,
     user: User = Depends(get_current_user),
@@ -70,6 +80,7 @@ async def play_move(
     if board.is_game_over():
         return PlayMoveOut(move=None, game_over=True)
 
+    await resolve_engine("stockfish")
     skill, movetime = LEVELS.get(payload.level, LEVELS[4])
 
     job = AnalysisJob(
@@ -88,7 +99,7 @@ async def play_move(
     # Subscribe BEFORE enqueueing so we can't miss the worker's publish.
     await pubsub.subscribe(f"eval:{job_id}")
     try:
-        queue = "q:pro" if is_paid(user.plan) else "q:free"
+        queue = "q:stockfish:interactive"
         await redis.rpush(
             queue,
             json.dumps({

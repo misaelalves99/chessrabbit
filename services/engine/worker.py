@@ -1,10 +1,10 @@
 """
 ChessRabbit engine worker.
 
-Consumes analysis jobs from Redis, runs Stockfish (server-side only), streams
+Consumes analysis jobs from Redis, runs configured local UCI engines, streams
 eval lines back over Redis pub/sub, and persists results to analysis_cache.
 
-Queues, in priority order:  q:pro  ->  q:batch  ->  q:free
+Queues, in priority order:  q:{engine}:interactive  ->  q:{engine}:batch
 Pub/sub channel per job:    eval:{job_id}
 
 Concurrency: one consumer task per engine in the pool, so POOL_SIZE jobs run
@@ -19,15 +19,14 @@ import json
 import logging
 import os
 import signal
-import sys
 
 import chess
-import chess.pgn        # submodules are not auto-imported by `import chess`
+import chess.pgn  # submodules are not auto-imported by `import chess`
 import chess.polyglot
-import redis.asyncio as aioredis
 import psycopg
+import redis.asyncio as aioredis
 from psycopg.rows import dict_row
-
+from registry import CATALOG_KEY, start_profiles
 from uci import EnginePool, EvalLine
 
 logging.basicConfig(
@@ -75,21 +74,21 @@ def white_to_move(fen: str) -> bool:
 # Cache
 # ---------------------------------------------------------------
 
-async def cache_lookup(conn, zob: int, engine_version: str, min_depth: int) -> dict | None:
+async def cache_lookup(conn, zob: int, engine_version: str, min_depth: int, min_lines: int = 1) -> dict | None:
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             """
             SELECT depth, multipv, fen
             FROM analysis_cache
-            WHERE zobrist = %s AND engine_version = %s AND depth >= %s
+            WHERE zobrist = %s AND engine_version = %s AND depth >= %s AND jsonb_array_length(multipv) >= %s
             """,
-            (zob, engine_version, min_depth),
+            (zob, engine_version, min_depth, min_lines),
         )
         return await cur.fetchone()
 
 
 async def cache_store(conn, zob: int, fen: str, engine_version: str, depth: int, lines: list[dict]) -> None:
-    """Upsert, but only overwrite when the new analysis is deeper."""
+    """Upsert, but replace when the new analysis is deeper or has more lines."""
     async with conn.cursor() as cur:
         await cur.execute(
             """
@@ -100,6 +99,7 @@ async def cache_store(conn, zob: int, fen: str, engine_version: str, depth: int,
                   multipv = EXCLUDED.multipv,
                   fen     = EXCLUDED.fen
               WHERE analysis_cache.depth < EXCLUDED.depth
+                 OR jsonb_array_length(analysis_cache.multipv) < jsonb_array_length(EXCLUDED.multipv)
             """,
             (zob, fen, engine_version, depth, json.dumps(lines)),
         )
@@ -174,7 +174,7 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
     job_id = job["job_id"]
     fen = job["fen"]
     depth = min(int(job.get("depth", 20)), 40)
-    multipv = max(1, min(int(job.get("multipv", 1)), 5))
+    multipv = max(1, min(int(job.get("multipv", 1)), 10))
     channel = f"eval:{job_id}"
 
     # Cheapest possible check, before the engine or the database is touched.
@@ -193,9 +193,9 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
     zob = zobrist_of(fen)
     wtm = white_to_move(fen)
 
-    cached = await cache_lookup(conn, zob, pool.version, depth)
+    cached = await cache_lookup(conn, zob, pool.cache_key, depth, multipv)
     if cached:
-        payload = {"type": "done", "cached": True, "depth": cached["depth"], "lines": cached["multipv"]}
+        payload = {"type": "done", "cached": True, "depth": cached["depth"], "lines": cached["multipv"][:multipv], "engine": job.get("engine", "stockfish")}
         await redis.publish(channel, json.dumps(payload))
         await set_job_status(conn, job_id, "done", result=payload)
         log.info("job %s: cache hit at depth %s", job_id, cached["depth"])
@@ -214,7 +214,7 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
     try:
         async with pool.acquire() as engine:
             async for item in engine.analyse(
-                fen, depth=depth, multipv=multipv, movetime_ms=None,
+                fen, depth=depth, multipv=multipv, movetime_ms=MAX_MOVETIME_MS,
                 stop_event=stop_event,
             ):
                 if isinstance(item, dict) and item.get("type") == "bestmove":
@@ -223,7 +223,7 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
                         for k in sorted(best_by_pv)
                     ]
                     if reached_depth:
-                        await cache_store(conn, zob, fen, pool.version, reached_depth, lines)
+                        await cache_store(conn, zob, fen, pool.cache_key, reached_depth, lines)
 
                     # A stopped search still reached a real depth; bank it, but
                     # report it as canceled rather than a completed analysis.
@@ -238,6 +238,7 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
                     payload = {
                         "type": "done",
                         "cached": False,
+                        "engine": job.get("engine", "stockfish"),
                         "depth": reached_depth,
                         "best": item.get("move"),
                         "lines": lines,
@@ -260,7 +261,7 @@ async def handle_position_job(pool: EnginePool, redis, conn, job: dict) -> None:
                         best_by_pv[k].to_white_perspective(wtm).as_dict()
                         for k in sorted(best_by_pv)
                     ]
-                    await cache_store(conn, zob, fen, pool.version, ev.depth, snapshot)
+                    await cache_store(conn, zob, fen, pool.cache_key, ev.depth, snapshot)
     finally:
         watcher.cancel()
 
@@ -314,7 +315,7 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
     job_id = job["job_id"]
     game_id = job.get("game_id")
     user_id = job.get("user_id")
-    depth = min(int(job.get("depth", 18)), 24)
+    depth = max(1, min(int(job.get("depth", 18)), 40))
     channel = f"eval:{job_id}"
 
     async with conn.cursor(row_factory=dict_row) as cur:
@@ -378,7 +379,7 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
                     board.push(moves[idx])
                 continue
 
-            cached = await cache_lookup(conn, zob, pool.version, depth)
+            cached = await cache_lookup(conn, zob, pool.cache_key, depth)
             if cached:
                 lines = cached["multipv"]
                 first = lines[0] if lines else {}
@@ -389,7 +390,7 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
                 })
             else:
                 best: EvalLine | None = None
-                async for item in engine.analyse(fen, depth=depth, multipv=1):
+                async for item in engine.analyse(fen, depth=depth, multipv=1, movetime_ms=MAX_MOVETIME_MS):
                     if isinstance(item, dict):
                         break
                     best = item
@@ -397,7 +398,7 @@ async def handle_full_game_job(pool: EnginePool, redis, conn, job: dict) -> None
                     posinfo.append({"cp": 0.0, "mate": None, "pv": []})
                 else:
                     d = best.to_white_perspective(wtm).as_dict()
-                    await cache_store(conn, zob, fen, pool.version, d["depth"], [d])
+                    await cache_store(conn, zob, fen, pool.cache_key, d["depth"], [d])
                     posinfo.append({
                         "cp": _line_to_cp(d),
                         "mate": d.get("mate"),
@@ -658,13 +659,34 @@ def _accuracy_scores(evals: list[float]) -> dict:
     return {"white": score(white_losses), "black": score(black_losses)}
 
 
+# Games run to a few hundred plies at most, so this only ever splits the
+# pathological ones - but an unbounded batch is an unbounded pipeline buffer.
+_ANNOTATION_CHUNK = 500
+
+
 async def _store_annotations(
     conn, game_id: int, user_id: int, annotations: list[dict]
 ) -> None:
     """Upsert review rows. `comment` is the user's own field - never touched."""
+    if not annotations:
+        return
+
+    params = [
+        (
+            game_id, user_id, ann["ply"], ann["nag"], ann["eval_cp"],
+            ann["best_uci"], ann["move_uci"], ann["move_san"],
+            ann["classification"], ann["review"],
+        )
+        for ann in annotations
+    ]
+
+    # executemany(), not a statement per ply: psycopg3 sends the whole batch in
+    # pipeline mode, so a 90-move review is one round trip instead of 90. The
+    # engine time dominates a full-game job, but this ran at the end while
+    # holding both an engine and a connection.
     async with conn.cursor() as cur:
-        for ann in annotations:
-            await cur.execute(
+        for start in range(0, len(params), _ANNOTATION_CHUNK):
+            await cur.executemany(
                 """
                 INSERT INTO annotations
                   (game_id, user_id, ply, nag, eval_cp, best_uci, move_uci,
@@ -678,11 +700,7 @@ async def _store_annotations(
                       classification = EXCLUDED.classification,
                       review = EXCLUDED.review
                 """,
-                (
-                    game_id, user_id, ann["ply"], ann["nag"], ann["eval_cp"],
-                    ann["best_uci"], ann["move_uci"], ann["move_san"],
-                    ann["classification"], ann["review"],
-                ),
+                params[start : start + _ANNOTATION_CHUNK],
             )
     await conn.commit()
 
@@ -697,6 +715,7 @@ async def consume(consumer_id: int, queues: list[str], pool: EnginePool, redis) 
     log.info("Consumer %d up (queues=%s)", consumer_id, queues)
 
     while not shutdown.is_set():
+        job = None
         try:
             popped = await redis.blpop(queues, timeout=2)
             if popped is None:
@@ -721,6 +740,9 @@ async def consume(consumer_id: int, queues: list[str], pool: EnginePool, redis) 
             log.exception("Consumer %d: job failed with unhandled exception", consumer_id)
             try:
                 await conn.rollback()
+                if job and job.get("job_id"):
+                    await set_job_status(conn, job["job_id"], "failed", error="Engine job failed; check worker logs")
+                    await redis.publish(f"eval:{job['job_id']}", json.dumps({"type": "error", "code": "engine_failed", "message": "Engine job failed; check worker logs"}))
             except Exception:
                 try:
                     conn = await psycopg.AsyncConnection.connect(DATABASE_URL, autocommit=False)
@@ -731,33 +753,41 @@ async def consume(consumer_id: int, queues: list[str], pool: EnginePool, redis) 
     await conn.close()
 
 
+async def advertise(redis, catalog) -> None:
+    while not shutdown.is_set():
+        await redis.set(CATALOG_KEY, json.dumps(catalog), ex=90)
+        try:
+            await asyncio.wait_for(shutdown.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def main() -> None:
-    log.info("Starting engine worker (pool=%d threads=%d hash=%dMB)", POOL_SIZE, THREADS, HASH_MB)
-
-    pool = EnginePool(size=POOL_SIZE, threads=THREADS, hash_mb=HASH_MB)
-    try:
-        await pool.start()
-    except FileNotFoundError:
-        log.error("Stockfish binary not found. Install it or check the Dockerfile.")
-        sys.exit(1)
-
+    pools, catalog = await start_profiles(POOL_SIZE, THREADS, HASH_MB)
+    for entry in catalog:
+        log.info("Engine %s: %s", entry["id"], entry.get("version") or entry.get("error"))
     redis = aioredis.from_url(REDIS_URL, decode_responses=True)
-    log.info("Connected to Redis. Engine: %s", pool.version)
-
-    # One consumer per engine so the whole pool works in parallel. The last
-    # consumer skips q:batch: a full-game job holds an engine for minutes, and
-    # live position analysis must always have a free slot.
-    consumers: list[asyncio.Task] = []
-    for i in range(POOL_SIZE):
-        reserved = POOL_SIZE > 1 and i == POOL_SIZE - 1
-        queues = ["q:pro", "q:free"] if reserved else ["q:pro", "q:batch", "q:free"]
-        consumers.append(asyncio.create_task(consume(i, queues, pool, redis)))
-
-    await asyncio.gather(*consumers)
-
-    log.info("Shutting down engine pool")
-    await pool.stop()
-    await redis.aclose()
+    await redis.set(CATALOG_KEY, json.dumps(catalog), ex=90)
+    heartbeat = asyncio.create_task(advertise(redis, catalog))
+    consumers = []
+    for engine_id, pool in pools.items():
+        for i in range(pool.size):
+            queues = [f"q:{engine_id}:interactive"]
+            if pool.size == 1 or i != pool.size - 1:
+                queues.append(f"q:{engine_id}:batch")
+            consumers.append(asyncio.create_task(consume(i, queues, pool, redis)))
+    try:
+        if consumers:
+            await asyncio.gather(*consumers)
+        else:
+            await shutdown.wait()
+    finally:
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
+        for pool in pools.values():
+            await pool.stop()
+        await redis.delete(CATALOG_KEY)
+        await redis.aclose()
 
 
 def _handle_signal(*_args) -> None:

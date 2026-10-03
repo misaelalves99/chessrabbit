@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'codex/open-source-local-engines']
   pull_request:
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
           --health-cmd "pg_isready -U chessrabbit"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: redis:7.2-alpine
         ports: ["6379:6379"]
     steps:
       - uses: actions/checkout@v4
@@ -28,14 +28,24 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install API deps
-        run: pip install -r apps/api/requirements.txt ruff
+        # requirements-dev pulls in requirements plus pytest; installing the
+        # runtime file alone is why the tests under apps/api/tests never ran.
+        run: pip install -r apps/api/requirements-dev.txt
       - name: Lint
         run: ruff check apps/api services/engine pipeline
-      - name: Apply schema
+      - name: Apply migrations
+        # Every migration, in filename order — the same order initdb applies
+        # them to a fresh docker volume. Only 001 used to run here, so 002
+        # onward reached production having never been executed anywhere except
+        # a developer's own database. ON_ERROR_STOP makes psql exit non-zero;
+        # without it a failed statement is a printed notice and a green build.
         run: |
           sudo apt-get install -y postgresql-client
-          PGPASSWORD=devpassword psql -h 127.0.0.1 -U chessrabbit -d chessrabbit \
-            -f db/migrations/001_initial_schema.sql
+          for f in db/migrations/*.sql; do
+            echo "── $f"
+            PGPASSWORD=devpassword psql -v ON_ERROR_STOP=1 --quiet \
+              -h 127.0.0.1 -U chessrabbit -d chessrabbit -f "$f"
+          done
       - name: Import check
         working-directory: apps/api
         env:
@@ -43,6 +53,16 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379/0
           JWT_SECRET: ci-secret
         run: python -c "from app.main import app; print('routes:', len(app.openapi()['paths']))"
+      - name: Tests
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://chessrabbit:devpassword@127.0.0.1:5432/chessrabbit
+          REDIS_URL: redis://127.0.0.1:6379/0
+          JWT_SECRET: ci-secret
+          # Read by tests/test_schema_matches_migrations.py, which compares the
+          # models against the database the step above just built.
+          CHESSRABBIT_TEST_DB: postgresql+asyncpg://chessrabbit:devpassword@127.0.0.1:5432/chessrabbit
+        run: python -m pytest -q
 
   engine:
     runs-on: ubuntu-latest
@@ -54,7 +74,9 @@ jobs:
       - name: Install engine deps + stockfish
         run: |
           sudo apt-get update && sudo apt-get install -y stockfish
-          pip install -r services/engine/requirements.txt
+          pip install -r services/engine/requirements.txt pytest pytest-asyncio
+      - name: UCI profile regression tests
+        run: python -m pytest services/engine/tests -q
       - name: UCI parser + live engine smoke test
         working-directory: services/engine
         run: |
@@ -91,13 +113,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install
         working-directory: apps/web
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Typecheck + test + build
         working-directory: apps/web
         run: |
           npx tsc --noEmit
           npm test
           npx next build
+
+  local-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Start local installation
+        run: docker compose up --build -d
+      - name: Personal workspace and Stockfish analysis smoke test
+        run: python scripts/smoke_local.py
+      - name: Logs
+        if: failure()
+        run: docker compose logs --tail=100
+      - name: Stop test services
+        if: always()
+        run: docker compose down -v

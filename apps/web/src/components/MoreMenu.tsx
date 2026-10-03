@@ -13,7 +13,7 @@ import Link from "next/link";
  */
 const GROUPS: {
   heading: string;
-  items: { href: string; label: string; icon: string; blurb: string }[];
+  items: { href: string; label: string; blurb: string }[];
 }[] = [
   {
     heading: "Train",
@@ -21,25 +21,21 @@ const GROUPS: {
       {
         href: "/train",
         label: "Opening drills",
-        icon: "📚",
         blurb: "Spaced repetition on your repertoire",
       },
       {
         href: "/train/puzzles",
         label: "Puzzles",
-        icon: "🧩",
         blurb: "Rated tactics and Puzzle Rush",
       },
       {
         href: "/train/intuition",
         label: "Intuition",
-        icon: "🔮",
         blurb: "Guess the master's move",
       },
       {
         href: "/train/clock",
         label: "Time bank",
-        icon: "⏱",
         blurb: "Drill your clock management",
       },
     ],
@@ -48,27 +44,39 @@ const GROUPS: {
     heading: "Study",
     items: [
       {
+        href: "/search",
+        label: "Reference database",
+        blurb: "Search master games by player, opening or position",
+      },
+      {
+        href: "/study",
+        label: "Studies",
+        blurb: "Annotated chapters you can share",
+      },
+      {
         href: "/insights",
         label: "Insights",
-        icon: "💡",
         blurb: "How you actually play, across every game",
       },
       {
         href: "/prep",
         label: "Opponent prep",
-        icon: "🎯",
         blurb: "Scout what your next opponent plays",
       },
     ],
   },
   {
-    heading: "Account",
+    heading: "Project",
     items: [
       {
-        href: "/pricing",
-        label: "Plans and pricing",
-        icon: "★",
-        blurb: "Compare what each tier unlocks",
+        href: "/download",
+        label: "Download and setup",
+        blurb: "Run ChessRabbit on your own computer",
+      },
+      {
+        href: "/donate",
+        label: "Donate",
+        blurb: "Support free, open-source development",
       },
     ],
   },
@@ -115,7 +123,7 @@ export default function MoreMenu() {
             {GROUPS.map((group, gi) => (
               <div
                 key={group.heading}
-                className={gi > 0 ? "mt-1 border-t border-white/[0.06] pt-1" : ""}
+                className={gi > 0 ? "mt-1 border-t border-ivory/[0.06] pt-1" : ""}
               >
                 <p className="eyebrow px-2 py-1">{group.heading}</p>
                 {group.items.map((item) => (
@@ -124,11 +132,8 @@ export default function MoreMenu() {
                     href={item.href}
                     role="menuitem"
                     onClick={() => setOpen(false)}
-                    className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.07]"
+                    className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-ivory/[0.07]"
                   >
-                    <span aria-hidden className="mt-0.5 w-5 shrink-0 text-center text-base leading-none">
-                      {item.icon}
-                    </span>
                     <span className="min-w-0">
                       <span className="block text-sm">{item.label}</span>
                       <span className="block truncate text-[11px] text-muted">

@@ -9,6 +9,14 @@ from app.core.config import settings
 _redis: aioredis.Redis | None = None
 
 
+def configure_redis(client: aioredis.Redis) -> None:
+    """Inject the desktop's shared in-memory queue before starting the API."""
+    global _redis
+    if _redis is not None:
+        raise RuntimeError("Redis is already initialized")
+    _redis = client
+
+
 def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:

@@ -10,17 +10,21 @@ import {
   ROOT,
   addLine,
   addMove,
+  annotate,
+  canPromoteToMainline,
   deleteSubtree,
   endOfLine,
   mainlinePath,
   nearestMainline,
   nodeAt,
   promoteSibling,
+  promoteToMainline,
   siblingBy,
   startOfLine,
 } from "@/lib/moveTree";
 import { Row, renderTree } from "@/lib/moveTreeRender";
-import { parsePgn, toPgn } from "@/lib/pgn";
+import { parsePgn, toMovetext, toPgn } from "@/lib/pgn";
+import { Shape, joinComment, splitComment } from "@/lib/shapes";
 import { loadTree, saveTree } from "@/lib/treeStorage";
 
 /**
@@ -52,6 +56,15 @@ export interface MoveTreeApi {
   lastMove?: { from: Square; to: Square };
   /** Alternatives to the current move, the current one among them. */
   alternatives: NodeId[];
+  /** The PGN's own tag pairs - who played it, the result, the event. */
+  headers: Record<string, string>;
+
+  /** What was written about the move under the cursor, shapes stripped out. */
+  comment: string;
+  /** Arrows and circles drawn on the position under the cursor. */
+  shapes: Shape[];
+  /** True when this line may be made the main line - never on a played game. */
+  canPromote: boolean;
 
   seek: (id: NodeId) => void;
   seekPly: (ply: number) => void;
@@ -69,32 +82,85 @@ export interface MoveTreeApi {
   backToGame: () => void;
   removeLine: () => void;
   raiseLine: () => void;
+  /** Make the line under the cursor the main one. No-op on a played game. */
+  promoteLine: () => void;
+
+  /** Write about a move. Whatever is drawn on it is left alone. */
+  setComment: (id: NodeId, text: string) => void;
+  /** Redraw a position. Whatever was written about it is left alone. */
+  setShapes: (id: NodeId, shapes: Shape[]) => void;
+  /** !, ?, !! and the rest. `undefined` takes the mark off. */
+  setNag: (id: NodeId, nag: number | undefined) => void;
+
   /** The game and every line off it, as PGN anything else can read. */
   exportPgn: (headers?: Record<string, string>) => string;
+  /** The same moves with no tag pairs - what a study chapter stores. */
+  exportMovetext: () => string;
+}
+
+export interface MoveTreeOptions {
+  /**
+   * Let the main line be extended and reordered.
+   *
+   * A played game is locked: its main line IS the game, and the review is
+   * keyed against it (see the invariant at the top of moveTree.ts). A study
+   * chapter has no review and no game behind it - the main line is whatever
+   * its author decided it is, and they are still deciding.
+   */
+  unlocked?: boolean;
+  /** The position the tree stands on, when the caller knows better than the PGN. */
+  startFen?: string;
+  /**
+   * Called on a debounce with the movetext, whenever the tree has changed.
+   * Never on hydration, and never for a cursor move - neither writes anything
+   * a reader of the saved chapter would see.
+   */
+  onPersist?: (movetext: string) => void;
 }
 
 /** Long enough that walking a line does not write once per move. */
 const SAVE_AFTER_MS = 600;
 
-export function useMoveTree(initialPgn?: string, storageKey?: string): MoveTreeApi {
-  const [tree, setTree] = useState<MoveTree>(() => parsePgn(initialPgn ?? "").tree);
+export function useMoveTree(
+  initialPgn?: string,
+  storageKey?: string,
+  options: MoveTreeOptions = {}
+): MoveTreeApi {
+  const { unlocked, startFen, onPersist } = options;
+
+  const [tree, setTree] = useState<MoveTree>(() => parsePgn(initialPgn ?? "", startFen).tree);
   const [cursorId, setCursorId] = useState<NodeId>(ROOT);
   const [headers, setHeaders] = useState<Record<string, string>>({});
   // Nothing may be written back before the saved lines have had their chance
   // to load, or the first render would overwrite them with the bare game.
   const hydrated = useRef(false);
 
+  // The tree as the server last saw it, by identity. Every edit produces a new
+  // object and every navigation reuses the old one, so this distinguishes the
+  // two without diffing - and skips the save that hydration would otherwise
+  // fire immediately, writing the chapter back over itself on every open.
+  const persisted = useRef<MoveTree | null>(null);
+
+  // Held in a ref so a caller that rebuilds the callback each render does not
+  // restart the debounce on every render and never reach the timeout.
+  const persistRef = useRef(onPersist);
+  persistRef.current = onPersist;
+
   useEffect(() => {
-    const parsed = parsePgn(initialPgn ?? "");
+    const parsed = parsePgn(initialPgn ?? "", startFen);
     const saved = storageKey
       ? loadTree(storageKey, mainlinePath(parsed.tree).map((n) => n.san))
       : null;
 
+    const next = saved?.tree ?? parsed.tree;
+    const adopted = unlocked ? { ...next, locked: false } : next;
+
     setHeaders(parsed.headers);
-    setTree(saved?.tree ?? parsed.tree);
+    setTree(adopted);
     setCursorId(saved?.cursorId ?? ROOT);
+    persisted.current = adopted;
     hydrated.current = true;
-  }, [initialPgn, storageKey]);
+  }, [initialPgn, storageKey, startFen, unlocked]);
 
   useEffect(() => {
     if (!storageKey || !hydrated.current) return;
@@ -102,15 +168,41 @@ export function useMoveTree(initialPgn?: string, storageKey?: string): MoveTreeA
     return () => clearTimeout(timer);
   }, [storageKey, tree, cursorId]);
 
+  useEffect(() => {
+    if (!hydrated.current || persisted.current === tree) return;
+    const timer = setTimeout(() => {
+      persisted.current = tree;
+      persistRef.current?.(toMovetext(tree));
+    }, SAVE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [tree]);
+
   const main = useMemo(() => mainlinePath(tree), [tree]);
   const rows = useMemo(() => renderTree(tree), [tree]);
+  const history = useMemo(() => main.map((n) => n.san), [main]);
+  const mainUci = useMemo(() => main.map((n) => n.uci), [main]);
 
-  const node = nodeAt(tree, cursorId) ?? nodeAt(tree, tree.root)!;
+  /**
+   * The node an id names, or the root when it names nothing. A cursor can
+   * outlive the node it points at - a restored one whose line no longer
+   * replays, a deleted subtree - and the board draws the root in that case, so
+   * walking has to start from the same place the board is showing.
+   */
+  const at = useCallback(
+    (id: NodeId) => nodeAt(tree, id) ?? nodeAt(tree, tree.root)!,
+    [tree]
+  );
+
+  const node = at(cursorId);
   const onMainline = node.mainline;
 
-  const lastMove = node.uci
-    ? { from: node.uci.slice(0, 2) as Square, to: node.uci.slice(2, 4) as Square }
-    : undefined;
+  const lastMove = useMemo(
+    () =>
+      node.uci
+        ? { from: node.uci.slice(0, 2) as Square, to: node.uci.slice(2, 4) as Square }
+        : undefined,
+    [node]
+  );
 
   const alternatives = useMemo(() => {
     if (node.parent === null) return [];
@@ -163,21 +255,39 @@ export function useMoveTree(initialPgn?: string, storageKey?: string): MoveTreeA
     [tree, node]
   );
 
-  const back = useCallback(() => setCursorId(node.parent ?? ROOT), [node]);
+  /*
+   * Walking the tree only ever moves the cursor, so each of these asks for the
+   * next id from the one React is holding rather than from one read during a
+   * render. Two things fall out of that, and both matter when an arrow key is
+   * held down - which is how anyone reads through a game.
+   *
+   * A step that cannot be taken returns the id it was given, so React drops the
+   * update instead of committing a render that changes nothing. Forward at the
+   * end of a line is then free, however long you lean on the key.
+   *
+   * And because they close over the tree alone, they keep their identity while
+   * the cursor moves. `AnalysisBoard` hangs them off a window listener; being
+   * rebuilt on every step had that listener torn down and re-added between key
+   * repeats, and the renders that piled up behind it are what eventually
+   * tripped React's nested-update limit.
+   */
+  const back = useCallback(() => setCursorId((id) => at(id).parent ?? ROOT), [at]);
 
   // Forward continues the line you are standing in, not the game. Inside a
   // variation that is the only thing that makes it walkable.
-  const next = useCallback(() => {
-    if (node.children.length) setCursorId(node.children[0]);
-  }, [node]);
+  const next = useCallback(() => setCursorId((id) => at(id).children[0] ?? id), [at]);
 
-  const toStart = useCallback(() => {
-    // From within a side line, the first stop is that line's own beginning.
-    const head = startOfLine(tree, cursorId);
-    setCursorId(head === cursorId || cursorId === ROOT ? ROOT : head);
-  }, [tree, cursorId]);
+  const toStart = useCallback(
+    () =>
+      setCursorId((id) => {
+        // From within a side line, the first stop is that line's own beginning.
+        const head = startOfLine(tree, id);
+        return head === id || id === ROOT ? ROOT : head;
+      }),
+    [tree]
+  );
 
-  const toEnd = useCallback(() => setCursorId(endOfLine(tree, cursorId)), [tree, cursorId]);
+  const toEnd = useCallback(() => setCursorId((id) => endOfLine(tree, id)), [tree]);
 
   const nextAlternative = useCallback(
     (step: number) => setCursorId((id) => siblingBy(tree, id, step)),
@@ -185,8 +295,8 @@ export function useMoveTree(initialPgn?: string, storageKey?: string): MoveTreeA
   );
 
   const backToGame = useCallback(
-    () => setCursorId(nearestMainline(tree, cursorId)),
-    [tree, cursorId]
+    () => setCursorId((id) => nearestMainline(tree, id)),
+    [tree]
   );
 
   const removeLine = useCallback(() => {
@@ -197,34 +307,123 @@ export function useMoveTree(initialPgn?: string, storageKey?: string): MoveTreeA
 
   const raiseLine = useCallback(() => setTree(promoteSibling(tree, cursorId)), [tree, cursorId]);
 
-  return {
-    tree,
-    rows,
-    cursorId,
-    node,
-    fen: node.fen,
-    history: useMemo(() => main.map((n) => n.san), [main]),
-    mainUci: useMemo(() => main.map((n) => n.uci), [main]),
-    onMainline,
-    cursorPly: onMainline ? node.ply + 1 : -1,
-    lastMove,
-    alternatives,
-    seek,
-    seekPly,
-    play,
-    playLine,
-    playInstead,
-    back,
-    next,
-    toStart,
-    toEnd,
-    nextAlternative,
-    backToGame,
-    removeLine,
-    raiseLine,
-    exportPgn: useCallback(
-      (extra: Record<string, string> = {}) => toPgn(tree, { ...headers, ...extra }),
-      [tree, headers]
-    ),
-  };
+  const promoteLine = useCallback(
+    () => setTree((t) => promoteToMainline(t, cursorId)),
+    [cursorId]
+  );
+
+  /*
+   * Prose and shapes share one field.
+   *
+   * PGN keeps both in the move's comment - `{the plan [%cal Gd2d4]}` - and so
+   * do we, because that is what makes a chapter open in Lichess with its
+   * arrows on. The cost is that writing either one has to preserve the other,
+   * which is what these two do: each reads the comment apart, replaces its own
+   * half, and puts it back together.
+   */
+  const setComment = useCallback((id: NodeId, text: string) => {
+    setTree((t) => {
+      const n = nodeAt(t, id);
+      if (!n) return t;
+      const { shapes } = splitComment(n.comment);
+      return annotate(t, id, { comment: joinComment(text, shapes) });
+    });
+  }, []);
+
+  const setShapes = useCallback((id: NodeId, shapes: Shape[]) => {
+    setTree((t) => {
+      const n = nodeAt(t, id);
+      if (!n) return t;
+      const { text } = splitComment(n.comment);
+      return annotate(t, id, { comment: joinComment(text, shapes) });
+    });
+  }, []);
+
+  const setNag = useCallback((id: NodeId, nag: number | undefined) => {
+    setTree((t) => (nodeAt(t, id) ? annotate(t, id, { nag }) : t));
+  }, []);
+
+  const written = useMemo(() => splitComment(node.comment), [node.comment]);
+
+  const exportPgn = useCallback(
+    (extra: Record<string, string> = {}) => toPgn(tree, { ...headers, ...extra }),
+    [tree, headers]
+  );
+
+  const exportMovetext = useCallback(() => toMovetext(tree), [tree]);
+
+  // Handed out as one value that only changes when something in it did. The
+  // board keeps this in effect dependencies - a fresh object per render meant
+  // those effects re-ran on every engine message and every panel update, none
+  // of which move the cursor.
+  return useMemo(
+    () => ({
+      tree,
+      rows,
+      cursorId,
+      node,
+      fen: node.fen,
+      history,
+      mainUci,
+      onMainline,
+      cursorPly: onMainline ? node.ply + 1 : -1,
+      lastMove,
+      alternatives,
+      headers,
+      comment: written.text,
+      shapes: written.shapes,
+      canPromote: canPromoteToMainline(tree, cursorId),
+      seek,
+      seekPly,
+      play,
+      playLine,
+      playInstead,
+      back,
+      next,
+      toStart,
+      toEnd,
+      nextAlternative,
+      backToGame,
+      removeLine,
+      raiseLine,
+      promoteLine,
+      setComment,
+      setShapes,
+      setNag,
+      exportPgn,
+      exportMovetext,
+    }),
+    [
+      tree,
+      rows,
+      cursorId,
+      node,
+      history,
+      mainUci,
+      onMainline,
+      lastMove,
+      alternatives,
+      headers,
+      written,
+      seek,
+      seekPly,
+      play,
+      playLine,
+      playInstead,
+      back,
+      next,
+      toStart,
+      toEnd,
+      nextAlternative,
+      backToGame,
+      removeLine,
+      raiseLine,
+      promoteLine,
+      setComment,
+      setShapes,
+      setNag,
+      exportPgn,
+      exportMovetext,
+    ]
+  );
 }

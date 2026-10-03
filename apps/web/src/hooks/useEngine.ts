@@ -1,12 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAccessToken, EvalLine } from "@/lib/api";
+import { api, getAccessToken, EvalLine } from "@/lib/api";
+
+import { getSettings } from "@/lib/settings";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
 
 export interface EngineState {
   lines: EvalLine[];
+  /**
+   * The position `lines` describe.
+   *
+   * Not always the position on the board: the board waits for the cursor to
+   * settle before asking, so for a moment after a move the lines still belong
+   * to where you just were. Anything that reads a score into a record - or
+   * turns a PV into SAN - has to key off this rather than off the board, or it
+   * files the previous position's evaluation against the current one.
+   */
+  fen: string | null;
+  engineId: string | null;
   depth: number;
   thinking: boolean;
   connected: boolean;
@@ -16,8 +29,7 @@ export interface EngineState {
 /**
  * Live engine analysis over WebSocket.
  *
- * The engine runs server-side (Stockfish, GPL-3.0) - the browser only ever
- * receives evaluation numbers, never engine code. See BLUEPRINT.md Section 3.
+ * A locally configured UCI engine runs in a separate worker process.
  */
 export function useEngine() {
   const wsRef = useRef<WebSocket | null>(null);
@@ -26,6 +38,8 @@ export function useEngine() {
 
   const [state, setState] = useState<EngineState>({
     lines: [],
+    fen: null,
+    engineId: null,
     depth: 0,
     thinking: false,
     connected: false,
@@ -40,7 +54,10 @@ export function useEngine() {
     }
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(`${WS_URL}/ws/analysis?token=${token}`);
+    const url = new URL(`${WS_URL}/ws/analysis`, window.location.href);
+    url.protocol = url.protocol === "https:" || url.protocol === "wss:" ? "wss:" : "ws:";
+    url.searchParams.set("token", token);
+    const ws = new WebSocket(url.href);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -90,8 +107,21 @@ export function useEngine() {
       }
     };
 
-    ws.onclose = () => {
-      setState((s) => ({ ...s, connected: false, thinking: false }));
+    ws.onclose = (event) => {
+      // 4401 (bad token) and 4429 (live-board resource limit) are decisions, not
+      // blips: the same socket will be refused every time, so retrying every
+      // 2s just hammers the API — noticeably so with a second tab open, which
+      // is exactly what trips 4429. Surface the reason and stay down.
+      const refused = event.code === 4401 || event.code === 4429;
+      if (refused) shouldReconnect.current = false;
+
+      setState((s) => ({
+        ...s,
+        connected: false,
+        thinking: false,
+        error: refused ? event.reason || "Engine connection refused" : s.error,
+      }));
+
       if (shouldReconnect.current) {
         reconnectRef.current = setTimeout(connect, 2000);
       }
@@ -104,7 +134,8 @@ export function useEngine() {
 
   useEffect(() => {
     shouldReconnect.current = true;
-    connect();
+    if (getAccessToken()) connect();
+    else api.me().then(() => { if (shouldReconnect.current) connect(); }).catch(() => setState((s) => ({ ...s, error: "Could not open local session" })));
     return () => {
       shouldReconnect.current = false;
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
@@ -112,11 +143,11 @@ export function useEngine() {
     };
   }, [connect]);
 
-  const analyse = useCallback((fen: string, depth = 22, multipv = 3) => {
+  const analyse = useCallback((fen: string, depth = 22, multipv = 3, engine = getSettings().engine) => {
     const ws = wsRef.current;
     if (ws?.readyState !== WebSocket.OPEN) return;
-    setState((s) => ({ ...s, lines: [], depth: 0, thinking: true, error: null }));
-    ws.send(JSON.stringify({ op: "start", fen, depth, multipv }));
+    setState((s) => ({ ...s, lines: [], fen, engineId: engine, depth: 0, thinking: true, error: null }));
+    ws.send(JSON.stringify({ op: "start", fen, depth, multipv, engine }));
   }, []);
 
   const stop = useCallback(() => {

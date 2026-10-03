@@ -21,7 +21,7 @@ import io
 import json
 import logging
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Iterable
@@ -31,6 +31,7 @@ import chess.pgn
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.openings import normalize_eco, opening_label
 from app.models import Annotation, User
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,11 @@ log = logging.getLogger(__name__)
 REPLAY_LIMIT = 400
 
 CACHE_TTL = 300  # seconds
+
+# An opening you played once says nothing about how you play it, and a long
+# tail of one-offs buries the lines you actually have a record in.
+MIN_OPENING_GAMES = 2
+MAX_OPENING_ROWS = 12
 
 CLASSIFICATIONS = (
     "brilliant", "best", "excellent", "good", "book",
@@ -209,19 +215,21 @@ async def _sql_aggregates(db: AsyncSession, user_id: int, filters: Filters) -> d
         GROUP BY 1 ORDER BY 1
     """)
 
-    # --- openings, split by the colour you held ---
+    # --- openings, split by the colour you held. Grouped by the (name, code)
+    # pair the PGN actually carried, never by name alone: nameless games would
+    # otherwise pool into one row wearing whichever ECO sorted highest. The
+    # displayed name, and the "played twice" cut, are settled in Python, where
+    # a game holding only a code can still be given its family's name. ---
     openings = await rows(f"""
         SELECT g.user_color                                            AS color,
-               coalesce(nullif(g.opening, ''), 'Unknown opening')      AS name,
-               max(g.eco)                                              AS eco,
+               nullif(btrim(g.opening), '')                            AS name,
+               nullif(btrim(g.eco), '')                                AS eco,
                count(*)                                                AS games,
                count(*) FILTER (WHERE (g.result = '1-0') = (g.user_color = 'w')
                                   AND g.result <> '1/2-1/2')           AS wins,
                count(*) FILTER (WHERE g.result = '1/2-1/2')            AS draws
         FROM games g WHERE {where}
-        GROUP BY 1, 2
-        HAVING count(*) >= 2
-        ORDER BY 4 DESC
+        GROUP BY 1, 2, 3
     """)
 
     # --- calendar. played_at is the only source with a clock on it, and the
@@ -520,19 +528,48 @@ def _counter() -> defaultdict:
 # ----------------------------------------------------------------------------
 
 def _openings_payload(rows: list) -> dict:
-    out: dict[str, list[dict]] = {"w": [], "b": []}
+    """
+    Fold the raw (name, code) groups into one row per opening, per colour.
+
+    Games that arrived without a name are labelled from their ECO code, so a
+    Chess.com library reads as "Italian Game" and "Caro-Kann Defense" instead
+    of collapsing into a single "Unknown opening" row.
+    """
+    buckets: dict[str, dict[str, dict]] = {"w": {}, "b": {}}
     for color, name, eco, games, wins, draws in rows:
-        if len(out[color]) >= 12:
+        if color not in buckets:
             continue
-        out[color].append({
-            "name": name,
-            "eco": eco,
-            "games": games,
-            "wins": wins,
-            "draws": draws,
-            "losses": games - wins - draws,
-        })
-    return {"white": out["w"], "black": out["b"]}
+        label = opening_label(name, eco)
+        row = buckets[color].setdefault(
+            label,
+            {"name": label, "codes": Counter(), "games": 0, "wins": 0, "draws": 0},
+        )
+        code = normalize_eco(eco)
+        if code:
+            row["codes"][code] += games
+        row["games"] += games
+        row["wins"] += wins
+        row["draws"] += draws
+
+    def ranked(color: str) -> list[dict]:
+        # One game is an anecdote, not a pattern, and the page says as much.
+        kept = [r for r in buckets[color].values() if r["games"] >= MIN_OPENING_GAMES]
+        kept.sort(key=lambda r: (-r["games"], r["name"]))
+        return [
+            {
+                "name": r["name"],
+                # The code most of the row is made of. A named opening can
+                # span several; showing the commonest beats showing none.
+                "eco": r["codes"].most_common(1)[0][0] if r["codes"] else None,
+                "games": r["games"],
+                "wins": r["wins"],
+                "draws": r["draws"],
+                "losses": r["games"] - r["wins"] - r["draws"],
+            }
+            for r in kept[:MAX_OPENING_ROWS]
+        ]
+
+    return {"white": ranked("w"), "black": ranked("b")}
 
 
 async def build_insights(db: AsyncSession, user: User, filters: Filters) -> dict:

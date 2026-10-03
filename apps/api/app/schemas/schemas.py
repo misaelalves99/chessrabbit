@@ -6,7 +6,6 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-
 # ---------- auth ----------
 
 class RegisterRequest(BaseModel):
@@ -17,7 +16,11 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    # Bounded like the registration field. Argon2 hashes whatever it is given,
+    # so an unbounded password field lets one request spend seconds of CPU -
+    # cheap to send, expensive to serve, and it sits in front of the login rate
+    # limiter rather than behind it.
+    password: str = Field(max_length=200)
 
 
 class TokenPair(BaseModel):
@@ -35,8 +38,34 @@ class ForgotRequest(BaseModel):
 
 
 class ResetRequest(BaseModel):
-    token: str
+    token: str = Field(max_length=200)
     new_password: str = Field(min_length=8, max_length=200)
+
+
+class VerifyRequest(BaseModel):
+    token: str = Field(max_length=200)
+
+
+# ---------- admin ----------
+
+class AdminLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(max_length=200)
+
+
+class AdminToken(BaseModel):
+    """
+    Deliberately NOT a TokenPair: the admin surface issues no refresh token.
+    The session expires and is signed in again, which is the only thing
+    bounding a stolen admin token since there is nothing to revoke.
+    """
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    display_name: str
+
+
 
 
 # ---------- user ----------
@@ -45,7 +74,6 @@ class UserOut(BaseModel):
     id: int
     email: str
     display_name: str
-    plan: str
     email_verified: bool
     created_at: datetime
     puzzle_rating: int = 1200
@@ -55,10 +83,15 @@ class UserOut(BaseModel):
 
 
 class MeOut(UserOut):
+    local_mode: bool = False
     analyses_today: int
     daily_limit: int | None
     max_depth: int
     max_multipv: int
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 # ---------- games ----------
@@ -80,9 +113,23 @@ class GameOut(BaseModel):
         from_attributes = True
 
 
+class SearchResults(BaseModel):
+    """
+    One page of reference-database hits.
+
+    `has_more` rather than a total: counting the matches of a filtered query
+    over millions of games costs more than fetching the page, and the only
+    question the UI actually asks is whether there is a next one.
+    """
+
+    games: list[GameOut]
+    page: int
+    has_more: bool
+
+
 class GameDetail(GameOut):
     movetext: str
-    annotations: list["AnnotationOut"] = []
+    annotations: list[AnnotationOut] = []
 
 
 class ImportPgnRequest(BaseModel):
@@ -131,9 +178,10 @@ class AnnotationOut(BaseModel):
 # ---------- analysis ----------
 
 class AnalysePositionRequest(BaseModel):
+    engine: str = Field(default="stockfish", pattern=r"^[a-z0-9_-]{1,40}$")
     fen: str = Field(max_length=200)
     depth: int = Field(default=20, ge=1, le=40)
-    multipv: int = Field(default=1, ge=1, le=5)
+    multipv: int = Field(default=1, ge=1, le=10)
 
 
 class AnalysisJobOut(BaseModel):
@@ -233,11 +281,17 @@ class IntuitionOut(BaseModel):
     ply: int
 
 
-# ---------- opponent prep (master tier) ----------
+# ---------- opponent prep  ----------
+
+# Platform usernames are pasted straight into a lichess.org / chess.com URL
+# path, so the charset is the thing that keeps a "username" from being a path
+# segment. Matches what both platforms actually allow.
+PLATFORM_USERNAME = r"^[\w.-]+$"
+
 
 class PrepRequest(BaseModel):
     platform: str = Field(pattern="^(lichess|chesscom)$")
-    username: str = Field(min_length=1, max_length=60)
+    username: str = Field(min_length=1, max_length=60, pattern=PLATFORM_USERNAME)
 
 
 class PrepLine(BaseModel):
@@ -258,7 +312,7 @@ class PrepDossier(BaseModel):
 
 class PrepRepertoireIn(BaseModel):
     platform: str = Field(pattern="^(lichess|chesscom)$")
-    username: str = Field(min_length=1, max_length=60)
+    username: str = Field(min_length=1, max_length=60, pattern=PLATFORM_USERNAME)
     my_color: str = Field(pattern="^(white|black)$")
 
 
@@ -272,8 +326,6 @@ class OpeningOut(BaseModel):
     description: str
     moves: str                # PGN with the opponent's alternatives in ( )
     rank: int                 # popularity order within the colour (1 = top)
-    tier: str                 # minimum plan that unlocks it
-    locked: bool = False      # computed for the requesting user
 
 
 # ---------- collections ----------
@@ -298,7 +350,7 @@ GameDetail.model_rebuild()
 
 class ConnectAccountRequest(BaseModel):
     platform: str = Field(pattern="^(lichess|chesscom)$")
-    username: str = Field(min_length=2, max_length=50, pattern=r"^[\w.-]+$")
+    username: str = Field(min_length=2, max_length=50, pattern=PLATFORM_USERNAME)
 
 
 class ExternalAccountOut(BaseModel):
@@ -364,3 +416,106 @@ class TrainingResult(BaseModel):
     expected_uci: str
     expected_san: str
     next_due_days: float
+
+
+# ---------- studies ----------
+
+VISIBILITY = "^(private|unlisted|public)$"
+ORIENTATION = "^(white|black)$"
+
+# One chapter's movetext, with every variation and comment in it. Generous
+# rather than unbounded: a heavily annotated opening chapter runs to tens of
+# kilobytes, and the cap is what stops a study being used as blob storage.
+MAX_CHAPTER_PGN = 400_000
+
+
+class StudyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=4000)
+    visibility: str = Field(default="private", pattern=VISIBILITY)
+    # Seed the first chapter from a game you already have, or from pasted PGN.
+    # Both optional: an empty study opens on a board you can start playing on.
+    from_game_id: int | None = None
+    pgn: str | None = Field(default=None, max_length=MAX_CHAPTER_PGN)
+
+
+class StudyUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=4000)
+    visibility: str | None = Field(default=None, pattern=VISIBILITY)
+
+
+class ChapterCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=20_000)
+    pgn: str = Field(default="", max_length=MAX_CHAPTER_PGN)
+    starting_fen: str | None = Field(default=None, max_length=120)
+    orientation: str = Field(default="white", pattern=ORIENTATION)
+    from_game_id: int | None = None
+
+
+class ChapterUpdate(BaseModel):
+    """
+    Every field optional: the board autosaves `pgn` alone many times per
+    session, and the header form saves `name` without touching the tree.
+
+    `version` is not optional in practice - a write that omits it is taken as
+    "I did not read this chapter first" and is only allowed when it changes
+    nothing about the tree. See routers/studies.py.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=20_000)
+    pgn: str | None = Field(default=None, max_length=MAX_CHAPTER_PGN)
+    orientation: str | None = Field(default=None, pattern=ORIENTATION)
+    version: int | None = None
+
+
+class ChapterOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    pgn: str
+    starting_fen: str
+    orientation: str
+    position: int
+    version: int
+
+    class Config:
+        from_attributes = True
+
+
+class StudyMemberOut(BaseModel):
+    user_id: int
+    display_name: str
+    email: str
+    role: str
+
+
+class StudyOut(BaseModel):
+    """The listing shape: everything but the chapters' movetext."""
+
+    id: int
+    name: str
+    description: str | None
+    visibility: str
+    slug: str
+    chapter_count: int
+    updated_at: datetime
+    owner_id: int
+    owner_name: str
+    # False when you are reading somebody else's shared study.
+    can_edit: bool
+
+
+class StudyDetail(StudyOut):
+    chapters: list[ChapterOut]
+    members: list[StudyMemberOut]
+
+
+class MemberAdd(BaseModel):
+    email: EmailStr
+
+
+class ChapterOrder(BaseModel):
+    chapter_ids: list[int] = Field(min_length=1, max_length=200)

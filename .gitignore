@@ -36,7 +36,17 @@ data/
 *.dump
 *.sql.gz
 
-# Engine binaries (installed via Dockerfile, never committed - see BLUEPRINT Section 3)
+# Local engines, configuration and downloaded neural networks
 stockfish
 stockfish.exe
 *.nnue
+engines/engines.json
+engines/lc0/
+engines/bin/
+.test-venv/
+.test-cache/
+.venv-cache/
+.oss_*.py
+.test-postgres/
+.test-engine/
+*.backup

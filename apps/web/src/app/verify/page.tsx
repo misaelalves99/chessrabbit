@@ -48,7 +48,7 @@ export default function VerifyPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-4 text-center">
-        <h1 className="text-2xl font-bold">Email verification</h1>
+        <h1 className="font-display text-3xl leading-none">Email verification</h1>
         <Suspense fallback={<p className="text-sm text-muted">Loading…</p>}>
           <VerifyInner />
         </Suspense>

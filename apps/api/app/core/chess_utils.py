@@ -9,6 +9,8 @@ import chess
 import chess.pgn
 import chess.polyglot
 
+from app.core.openings import MAX_NAME, name_from_eco_url
+
 MAX_INDEXED_PLY = 40  # BLUEPRINT 7.4: cap position index size
 
 
@@ -33,6 +35,21 @@ def _normalize_headers(pgn_text: str) -> str:
     The pattern only matches directly-adjacent tag brackets, so movetext
     comments like {[%clk 0:03]} are untouched."""
     return re.sub(r'\]\s*\[', ']\n[', pgn_text)
+
+
+def opening_of(headers) -> str | None:
+    """
+    The opening name a PGN claims, from wherever it put it.
+
+    Lichess sets `Opening`. Chess.com sets `ECOUrl` and no name at all, so
+    reading only the header left every Chess.com game nameless. We store just
+    what the PGN asserts - a name guessed from the ECO code alone belongs at
+    display time (`app.core.openings.opening_label`), not in the games table.
+    """
+    name = (headers.get("Opening") or "").strip()
+    if name and name != "?":
+        return name[:MAX_NAME]
+    return name_from_eco_url(headers.get("ECOUrl"))
 
 
 def classify_time_control(tc: str | None) -> str:
@@ -163,7 +180,7 @@ def parse_pgn(pgn_text: str) -> list[dict]:
                 "played_on": _safe_date(headers.get("UTCDate") or headers.get("Date")),
                 "played_at": played_at,
                 "eco": (headers.get("ECO") or None),
-                "opening": headers.get("Opening") or None,
+                "opening": opening_of(headers),
                 "time_control": time_control[:40] if time_control else None,
                 "time_class": classify_time_control(time_control),
                 "termination": classify_termination(headers.get("Termination"), result),

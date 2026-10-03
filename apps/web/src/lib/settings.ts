@@ -7,13 +7,14 @@ import { useSyncExternalStore } from "react";
  *
  * These live client-side on purpose: they are per-device taste (board colours,
  * animation speed) or a request parameter the server re-checks anyway (depth,
- * number of lines are clamped to the plan's ceiling in ws/analysis.py). Nothing
+ * number of lines are clamped to the configured ceiling in ws/analysis.py). Nothing
  * here is trusted — turning the depth up in devtools buys you nothing.
  */
 export interface Settings {
-  /** Engine search depth to request. Server clamps to the plan maximum. */
+  engine: string;
+  /** Engine search depth to request. Server clamps to the configured maximum. */
   depth: number;
-  /** Candidate lines to request. Server clamps to the plan maximum. */
+  /** Candidate lines to request. Server clamps to the configured maximum. */
   multipv: number;
   /** Re-analyse automatically whenever the position changes. */
   autoAnalyse: boolean;
@@ -32,6 +33,7 @@ export interface Settings {
 }
 
 export const DEFAULTS: Settings = {
+  engine: "stockfish",
   depth: 22,
   // One line by default. MultiPV 3 costs roughly 2-3x MultiPV 1 at the same
   // depth because the engine cannot prune to a single best line, and it is
@@ -47,12 +49,18 @@ export const DEFAULTS: Settings = {
   showCoordinates: true,
   highlightLastMove: true,
   animationMs: 200,
-  boardTheme: "periwinkle",
+  // Must match BOARD_THEMES[0].id in lib/boardTheme.ts, which is where the
+  // colours live. Not imported from there: boardTheme.ts imports useSettings
+  // from this file, so reading it back would be a cycle. When the default
+  // theme changes, change it in both places — this literal is how the board
+  // stayed walnut through an entire repalette, because swapping the theme
+  // list left this line pointing at the one brown theme still in it.
+  boardTheme: "slate",
 };
 
 /** Selectable engine depths and line counts, shared with the settings UI. */
-export const DEPTH_CHOICES = [12, 16, 18, 20, 22, 26, 30];
-export const LINE_CHOICES = [1, 2, 3, 4, 5];
+export const DEPTH_CHOICES = [12, 16, 18, 20, 22, 26, 30, 36, 40];
+export const LINE_CHOICES = [1, 2, 3, 4, 5, 10];
 
 const KEY = "cr_settings";
 
@@ -102,15 +110,8 @@ export function resetSettings(): void {
   updateSettings(DEFAULTS);
 }
 
-/**
- * Pull saved settings down to what the plan actually allows.
- *
- * The defaults are the paid ceiling, and the socket clamps anything higher
- * server-side — so without this a free account would sit there requesting
- * depth 22, silently receiving 18, and seeing a greyed-out "Depth 22 — locked"
- * as its own current setting. Call it once the user's plan is known.
- */
-export function clampToPlan(maxDepth: number, maxLines: number): void {
+/** Clamp preferences to the configured resource limits. */
+export function clampToResources(maxDepth: number, maxLines: number): void {
   const s = snapshot();
   const patch: Partial<Settings> = {};
   // Snap to the largest offered choice within the ceiling, so the value we
@@ -130,3 +131,5 @@ export function clampToPlan(maxDepth: number, maxLines: number): void {
 export function useSettings(): Settings {
   return useSyncExternalStore(subscribe, snapshot, () => DEFAULTS);
 }
+
+export const getSettings = snapshot;

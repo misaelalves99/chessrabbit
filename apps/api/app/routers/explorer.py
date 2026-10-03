@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date
 
 import chess
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,9 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.chess_utils import validate_fen, zobrist_of
 from app.core.db import get_db
 from app.core.deps import get_optional_user
+from app.core.ratelimit import rate_limit
 from app.core.redis_client import get_redis
 from app.models import User
-from app.schemas import ExplorerMove, ExplorerOut, ExplorerRequest, GameOut
+from app.schemas import ExplorerMove, ExplorerOut, ExplorerRequest, GameOut, SearchResults
 from app.services.lichess_explorer import ExplorerUnavailable, masters_moves
 
 log = logging.getLogger(__name__)
@@ -171,7 +173,43 @@ async def explorer(
     return out
 
 
-@router.post("/search/position", response_model=list[GameOut])
+"""
+How many results a page holds.
+
+Fifty is the blueprint's cap (§8.4). One extra row is always fetched and then
+discarded: it is what answers "is there a next page" without a COUNT over a
+filtered five-million-row table, which costs more than the page itself.
+"""
+PAGE = 50
+
+# Every paged query below ends `ORDER BY <rank> DESC NULLS LAST, g.id DESC`.
+# The id is not decoration - it is what makes the sort a TOTAL order. Ranking
+# by top Elo alone leaves every game sharing a rating in an order Postgres may
+# choose differently on each execution, and LIMIT/OFFSET then hands the same
+# game out on two pages while never showing another at all. Measured on 5,000
+# seeded games: three pages of 50 returned 145 distinct games.
+
+def _like_escape(value: str) -> str:
+    """Neutralise LIKE metacharacters so a search stays a substring match."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _paged(rows: list, page: int) -> SearchResults:
+    return SearchResults(
+        games=[GameOut(**dict(r)) for r in rows[:PAGE]],
+        page=page,
+        has_more=len(rows) > PAGE,
+    )
+
+
+@router.post(
+    "/search/position",
+    response_model=SearchResults,
+    # Public, and the heaviest read in the API: an index probe plus a join per
+    # result. Per IP rather than per account because a share link and a curious
+    # crawler both arrive without one (BLUEPRINT 8.4, 12.2).
+    dependencies=[rate_limit("search_position", 60, 60)],
+)
 async def search_by_position(
     payload: ExplorerRequest,
     page: int = Query(default=1, ge=1),
@@ -184,7 +222,6 @@ async def search_by_position(
         raise HTTPException(status_code=400, detail={"code": "invalid_fen", "message": str(exc)})
 
     zob = zobrist_of(payload.fen)
-    limit, offset = 50, (page - 1) * 50
 
     rows = await db.execute(
         text(
@@ -194,53 +231,88 @@ async def search_by_position(
             FROM game_positions p
             JOIN games g ON g.id = p.game_id
             WHERE p.zobrist = :zob AND g.owner_id IS NULL
-            ORDER BY GREATEST(g.white_elo, g.black_elo) DESC NULLS LAST
+            ORDER BY GREATEST(g.white_elo, g.black_elo) DESC NULLS LAST, g.id DESC
             LIMIT :lim OFFSET :off
             """
         ),
-        {"zob": zob, "lim": limit, "off": offset},
+        {"zob": zob, "lim": PAGE + 1, "off": (page - 1) * PAGE},
     )
-    return [GameOut(**dict(r)) for r in rows.mappings()]
+    return _paged(list(rows.mappings()), page)
 
 
-@router.get("/search/games", response_model=list[GameOut])
+@router.get(
+    "/search/games",
+    response_model=SearchResults,
+    dependencies=[rate_limit("search_games", 60, 60)],
+)
 async def search_games(
-    white: str | None = None,
-    black: str | None = None,
-    eco: str | None = None,
+    # Bounded like `opening` already was. These land in a LIKE pattern against
+    # a five-million-row table, and an unbounded one is a cheap request that
+    # buys expensive work.
+    white: str | None = Query(default=None, max_length=100),
+    black: str | None = Query(default=None, max_length=100),
+    eco: str | None = Query(default=None, max_length=8),
+    opening: str | None = Query(default=None, max_length=100),
     result: str | None = None,
-    min_elo: int | None = None,
+    min_elo: int | None = Query(default=None, ge=0, le=4000),
+    date_from: date | None = None,
+    date_to: date | None = None,
     page: int = Query(default=1, ge=1),
     db: AsyncSession = Depends(get_db),
     user: User | None = Depends(get_optional_user),
 ):
-    """Metadata search over the public reference database."""
-    clauses = ["g.owner_id IS NULL"]
-    params: dict = {"lim": 50, "off": (page - 1) * 50}
+    """
+    Metadata search over the public reference database (BLUEPRINT 8.4).
 
+    Every LIKE here is an infix match, which a btree cannot answer. The trigram
+    GIN indexes from migration 012 (names) and 015 (opening) are what keep this
+    off a sequential scan - do not "optimise" these into prefix matches without
+    checking the plan, and do not add a new LIKE column without an index to go
+    with it.
+    """
+    clauses = ["g.owner_id IS NULL"]
+    params: dict = {"lim": PAGE + 1, "off": (page - 1) * PAGE}
+
+    # `%` and `_` are wildcards to LIKE, not letters. Passing them through
+    # unescaped let a one-character search ("%") match every game in the
+    # reference database, which is a full scan the trigram index cannot help
+    # with - the cheapest denial-of-service in the API. Escaping them makes the
+    # box search for the characters the user typed, which is also what they
+    # meant. (Not an injection: values are bound, never interpolated.)
     if white:
-        clauses.append("lower(g.white) LIKE :white")
-        params["white"] = f"%{white.lower()}%"
+        clauses.append("lower(g.white) LIKE :white ESCAPE '\\'")
+        params["white"] = f"%{_like_escape(white.lower())}%"
     if black:
-        clauses.append("lower(g.black) LIKE :black")
-        params["black"] = f"%{black.lower()}%"
+        clauses.append("lower(g.black) LIKE :black ESCAPE '\\'")
+        params["black"] = f"%{_like_escape(black.lower())}%"
     if eco:
         clauses.append("g.eco = :eco")
         params["eco"] = eco.upper()[:3]
-    if result:
+    if opening:
+        clauses.append("lower(g.opening) LIKE :opening ESCAPE '\\'")
+        params["opening"] = f"%{_like_escape(opening.lower())}%"
+    if result in ("1-0", "0-1", "1/2-1/2", "*"):
         clauses.append("g.result = :result")
         params["result"] = result
     if min_elo:
         clauses.append("GREATEST(g.white_elo, g.black_elo) >= :min_elo")
         params["min_elo"] = min_elo
+    # A game with no date is excluded by either bound rather than treated as
+    # matching: "games since 2020" should not hand back everything undated.
+    if date_from:
+        clauses.append("g.played_on >= :date_from")
+        params["date_from"] = date_from
+    if date_to:
+        clauses.append("g.played_on <= :date_to")
+        params["date_to"] = date_to
 
     sql = f"""
         SELECT g.id, g.white, g.black, g.white_elo, g.black_elo, g.result,
                g.event, g.played_on, g.eco, g.opening, g.ply_count
         FROM games g
         WHERE {' AND '.join(clauses)}
-        ORDER BY GREATEST(g.white_elo, g.black_elo) DESC NULLS LAST
+        ORDER BY GREATEST(g.white_elo, g.black_elo) DESC NULLS LAST, g.id DESC
         LIMIT :lim OFFSET :off
     """
     rows = await db.execute(text(sql), params)
-    return [GameOut(**dict(r)) for r in rows.mappings()]
+    return _paged(list(rows.mappings()), page)

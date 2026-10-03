@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import io
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 from typing import Any, Iterable
 
@@ -34,8 +34,10 @@ import chess.pgn
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.openings import normalize_eco, opening_label
 from app.services.insights import (
-    DAY_LABELS, PIECE_NAMES, Filters, _Tally, _phase_of, outcome_for,
+    DAY_LABELS, MAX_OPENING_ROWS, MIN_OPENING_GAMES, PIECE_NAMES, Filters,
+    _Tally, _phase_of, outcome_for,
 )
 
 log = logging.getLogger(__name__)
@@ -223,18 +225,17 @@ def build_public_insights(
 
         terminations[outcome][game.get("termination") or "other"] += 1
 
-        # Chess.com PGNs carry ECO but often no Opening name, so fall back to
-        # the code rather than tipping a whole account into one bucket.
-        name = (
-            (game.get("opening") or "").strip()
-            or (game.get("eco") or "").strip()
-            or "Unknown opening"
-        )
+        # Chess.com PGNs carry an ECO code but no Opening name, so the code has
+        # to name the row. A bare "C50" told a reader nothing; the family does.
+        name = opening_label(game.get("opening"), game.get("eco"))
         key = f"{colour}:{name}"
         row = openings.setdefault(
-            key, {"colour": colour, "name": name, "eco": game.get("eco"),
+            key, {"colour": colour, "name": name, "codes": Counter(),
                   "games": 0, "wins": 0, "draws": 0}
         )
+        code = normalize_eco(game.get("eco"))
+        if code:
+            row["codes"][code] += 1
         row["games"] += 1
         if outcome == "win":
             row["wins"] += 1
@@ -264,13 +265,19 @@ def build_public_insights(
                     castle_phase["none"] += 1
 
     def opening_rows(colour: str) -> list[dict]:
-        rows = [r for r in openings.values() if r["colour"] == colour and r["games"] >= 2]
-        rows.sort(key=lambda r: r["games"], reverse=True)
+        rows = [
+            r for r in openings.values()
+            if r["colour"] == colour and r["games"] >= MIN_OPENING_GAMES
+        ]
+        rows.sort(key=lambda r: (-r["games"], r["name"]))
         return [
-            {"name": r["name"], "eco": r["eco"], "games": r["games"],
-             "wins": r["wins"], "draws": r["draws"],
+            {"name": r["name"],
+             # The code most of the row is made of; a named opening can span
+             # several, and the commonest is the honest one to show.
+             "eco": r["codes"].most_common(1)[0][0] if r["codes"] else None,
+             "games": r["games"], "wins": r["wins"], "draws": r["draws"],
              "losses": r["games"] - r["wins"] - r["draws"]}
-            for r in rows[:12]
+            for r in rows[:MAX_OPENING_ROWS]
         ]
 
     return {

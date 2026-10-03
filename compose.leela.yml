@@ -1,0 +1,5 @@
+services:
+  engine:
+    build:
+      context: ./services/engine
+      dockerfile: Dockerfile.lc0

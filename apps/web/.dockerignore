@@ -1,0 +1,9 @@
+# `COPY . .` in the Dockerfile would otherwise haul the host's node_modules,
+# .next and out/ into the build context - hundreds of MB that the image either
+# overwrites (node_modules comes from `npm install`) or masks with an anonymous
+# volume at run time.
+node_modules
+.next
+out
+tsconfig.tsbuildinfo
+.git

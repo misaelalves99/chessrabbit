@@ -5,8 +5,18 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer,
-    SmallInteger, String, Text, UniqueConstraint, func,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,7 +31,6 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    plan: Mapped[str] = mapped_column(Text, default="free", nullable=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -29,7 +38,7 @@ class User(Base):
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     puzzle_rating: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
 
-    games: Mapped[list["Game"]] = relationship(back_populates="owner")
+    games: Mapped[list[Game]] = relationship(back_populates="owner")
 
 
 class RefreshToken(Base):
@@ -40,6 +49,10 @@ class RefreshToken(Base):
     token_hash: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Root token id of this rotation chain (migration 012). Presenting an
+    # already-revoked member means a copy of it exists somewhere, so the whole
+    # family is revoked - see routers/auth.py.
+    family_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -54,16 +67,48 @@ class EmailToken(Base):
     used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
-class Subscription(Base):
-    __tablename__ = "subscriptions"
+
+
+
+
+class DailyActiveUser(Base):
+    """
+    One row per user per day they were seen (migration 013).
+
+    The durable half of presence tracking: Redis answers "who is online right
+    now", this answers "how many were active on any past day" and survives a
+    Redis flush.
+    """
+
+    __tablename__ = "daily_active_users"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class AdminAudit(Base):
+    """
+    Every admin mutation and every /admin sign-in attempt (migration 013).
+
+    `admin_id` is nullable: a failed login has no authenticated actor, and
+    deleting an admin account must not erase the record of what it did.
+    """
+
+    __tablename__ = "admin_audit"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
-    stripe_customer_id: Mapped[str] = mapped_column(Text, nullable=False)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    admin_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Game(Base):
@@ -98,7 +143,7 @@ class Game(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    owner: Mapped["User | None"] = relationship(back_populates="games")
+    owner: Mapped[User | None] = relationship(back_populates="games")
 
 
 class GamePosition(Base):
@@ -226,6 +271,62 @@ class Repertoire(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     color: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Study(Base):
+    """A shareable notebook of positions. See db/migrations/014_studies.sql."""
+
+    __tablename__ = "studies"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # private | unlisted | public. For an unlisted study the slug is the
+    # credential, so it is minted unguessable at creation - see the migration.
+    visibility: Mapped[str] = mapped_column(Text, nullable=False, default="private")
+    slug: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StudyChapter(Base):
+    """One board in a study: a start position plus the tree played from it."""
+
+    __tablename__ = "study_chapters"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    study_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("studies.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Movetext with variations, exactly as the browser's pgn.ts writes it.
+    pgn: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    starting_fen: Mapped[str] = mapped_column(Text, nullable=False)
+    orientation: Mapped[str] = mapped_column(Text, nullable=False, default="white")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Bumped on every accepted write; a write quoting a stale one is refused.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StudyMember(Base):
+    """Who besides the owner may write. Reading is governed by visibility."""
+
+    __tablename__ = "study_members"
+
+    study_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("studies.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="contributor")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Puzzle(Base):

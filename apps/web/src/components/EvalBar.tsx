@@ -23,13 +23,13 @@ export default function EvalBar({ pct, text, whiteAhead, flipped, height }: Prop
 
   return (
     <div
-      className="relative w-5 shrink-0 rounded-lg overflow-hidden bg-[#161B33] ring-1 ring-white/10 shadow-edge"
+      className="relative w-5 shrink-0 overflow-hidden rounded-lg bg-ebony shadow-edge ring-1 ring-ivory/15"
       style={{ height: height || undefined }}
       title={`Evaluation ${text}`}
       aria-label={`Evaluation ${text}`}
     >
       <div
-        className={`absolute inset-x-0 bg-gradient-to-b from-white to-[#DDE3F6] transition-[height] duration-500 ease-out ${
+        className={`absolute inset-x-0 bg-gradient-to-b from-white to-ivory transition-[height] duration-500 ease-out ${
           whiteAtBottom ? "bottom-0" : "top-0"
         }`}
         style={{ height: `${pct}%` }}
@@ -39,7 +39,7 @@ export default function EvalBar({ pct, text, whiteAhead, flipped, height }: Prop
       <span
         className={`absolute inset-x-0 text-[9px] leading-none font-mono font-bold text-center
                     ${labelAtBottom ? "bottom-1" : "top-1"}
-                    ${whiteAhead ? "text-[#0B1020]" : "text-ink"}`}
+                    ${whiteAhead ? "text-ebony" : "text-ink"}`}
       >
         {text}
       </span>

@@ -1,5 +1,5 @@
 """
-Opponent preparation (Master tier).
+Opponent preparation.
 
 Point it at an opponent's chess.com or Lichess account and it fetches their
 recent games, breaks down the openings they actually play with each colour,
@@ -19,12 +19,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.bulk import bulk_insert
 from app.core.chess_utils import zobrist_of
 from app.core.db import get_db
-from app.core.deps import require_master
+from app.core.deps import get_current_user
+from app.core.ratelimit import user_rate_limit
 from app.models import Repertoire, TrainingCard, User
 from app.schemas import (
-    PrepDossier, PrepLine, PrepRepertoireIn, PrepRequest, RepertoireOut,
+    PrepDossier,
+    PrepLine,
+    PrepRepertoireIn,
+    PrepRequest,
+    RepertoireOut,
 )
 from app.services.importers import PlatformError, fetch_games
 
@@ -101,10 +107,17 @@ def _aggregate(games: list[dict], username: str) -> tuple[dict, dict]:
     return top("white"), top("black")
 
 
-@router.post("/opponent", response_model=PrepDossier)
+# Each call pulls up to 200 games from Lichess/Chess.com. Their rate limits are
+# shared across our whole deployment, so one account must not be able to spend
+# everyone else's budget.
+@router.post(
+    "/opponent",
+    response_model=PrepDossier,
+    dependencies=[user_rate_limit("prep_dossier", 10, 60)],
+)
 async def opponent_dossier(
     payload: PrepRequest,
-    user: User = Depends(require_master),
+    user: User = Depends(get_current_user),
 ):
     """What does this opponent actually play? Their top lines with each colour."""
     games = await _fetch_opponent(payload.platform, payload.username)
@@ -134,10 +147,11 @@ async def _master_reply(db: AsyncSession, fen: str) -> str | None:
 
 
 @router.post("/opponent/repertoire", response_model=RepertoireOut,
-             status_code=status.HTTP_201_CREATED)
+             status_code=status.HTTP_201_CREATED,
+             dependencies=[user_rate_limit("prep_repertoire", 5, 60)])
 async def build_prep_repertoire(
     payload: PrepRepertoireIn,
-    user: User = Depends(require_master),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -239,14 +253,19 @@ async def build_prep_repertoire(
     )
     db.add(rep)
     await db.flush()
-    for c in cards.values():
-        db.add(
-            TrainingCard(
-                repertoire_id=rep.id, user_id=user.id, zobrist=c["zobrist"],
-                fen=c["fen"], expected_uci=c["expected_uci"],
-                expected_san=c["expected_san"],
-            )
-        )
+    await bulk_insert(
+        db,
+        TrainingCard,
+        [
+            {
+                "repertoire_id": rep.id, "user_id": user.id,
+                "zobrist": c["zobrist"], "fen": c["fen"],
+                "expected_uci": c["expected_uci"], "expected_san": c["expected_san"],
+            }
+            for c in cards.values()
+        ],
+        ignore_conflicts=True,
+    )
     await db.commit()
     return RepertoireOut(
         id=rep.id, name=rep.name, color=rep.color,

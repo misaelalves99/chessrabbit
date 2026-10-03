@@ -2,6 +2,7 @@ import {
   MoveSource,
   MoveTree,
   NodeId,
+  ROOT,
   addMove,
   annotate,
   createTree,
@@ -48,6 +49,12 @@ interface StoredTree {
   moves: StoredMove[];
   cursor: number;
   locked: boolean;
+  /**
+   * What was written about the starting position - including any shapes drawn
+   * on it, which live in the same comment. It has no move to hang off, so it
+   * cannot travel in `moves` the way every other annotation does.
+   */
+  r?: string;
 }
 
 /**
@@ -75,11 +82,20 @@ export function serializeTree(tree: MoveTree, cursorId: NodeId): StoredTree {
       return m;
     });
 
-  return { v: 1, moves, cursor: renumbered.get(cursorId) ?? 0, locked: tree.locked };
+  const out: StoredTree = {
+    v: 1,
+    moves,
+    cursor: renumbered.get(cursorId) ?? 0,
+    locked: tree.locked,
+  };
+  const rootComment = tree.nodes.get(tree.root)?.comment;
+  if (rootComment) out.r = rootComment;
+  return out;
 }
 
 export function deserializeTree(data: StoredTree): { tree: MoveTree; cursorId: NodeId } {
   let tree = createTree();
+  if (data.r) tree = annotate(tree, ROOT, { comment: data.r });
   for (const m of data.moves) {
     const r = addMove(tree, m.p, m.s, { source: m.k ?? "user", evalCp: m.e ?? null });
     if (r.id === m.p) break; // the list stopped describing a legal game
@@ -89,9 +105,20 @@ export function deserializeTree(data: StoredTree): { tree: MoveTree; cursorId: N
   return { tree: { ...tree, locked: data.locked }, cursorId: data.cursor };
 }
 
-/** A tree worth keeping is one that holds something the PGN does not. */
-function hasVariations(tree: MoveTree): boolean {
-  return tree.nodes.size - 1 > mainlinePath(tree).length;
+/**
+ * A tree worth keeping is one that holds something the PGN does not.
+ *
+ * Extra moves are the obvious case, but not the only one: a game where you
+ * only wrote on the moves that were played, or drew arrows over them, holds
+ * exactly as much work and no extra nodes at all. Counting nodes alone threw
+ * all of it away on reload.
+ */
+function worthKeeping(tree: MoveTree): boolean {
+  if (tree.nodes.size - 1 > mainlinePath(tree).length) return true;
+  for (const n of tree.nodes.values()) {
+    if (n.comment || n.nag != null) return true;
+  }
+  return false;
 }
 
 function store(): Storage | null {
@@ -132,7 +159,7 @@ export function saveTree(key: string, tree: MoveTree, cursorId: NodeId): void {
 
   // Explore, change your mind, delete the lot: the entry goes too, rather than
   // sitting there shadowing the game with an empty tree.
-  if (!hasVariations(tree)) {
+  if (!worthKeeping(tree)) {
     forget(ls, key);
     return;
   }

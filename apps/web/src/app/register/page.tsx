@@ -34,9 +34,9 @@ export default function RegisterPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4">
       <form onSubmit={submit} className="w-full max-w-sm space-y-4">
-        <h1 className="text-2xl font-bold">Create account</h1>
+        <h1 className="font-display text-3xl leading-none">Create account</h1>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-bad">{error}</p>}
 
         <input
           className="input"
@@ -65,9 +65,25 @@ export default function RegisterPage() {
           {busy ? "Creating…" : "Create account"}
         </button>
 
+        {/* Shown before the button is pressed, not linked from a page you
+            reach afterwards: agreement has to be available at the moment it
+            is given. Not a tick-box — an unticked box blocking signup is a
+            worse experience and no more informative. */}
+        <p className="text-xs leading-relaxed text-muted">
+          By creating an account you agree to our{" "}
+          <Link href="/terms" className="text-brassLit hover:underline">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/privacy" className="text-brassLit hover:underline">
+            Privacy Policy
+          </Link>
+          .
+        </p>
+
         <p className="text-sm text-muted">
           Have an account?{" "}
-          <Link href="/login" className="text-accent hover:underline">
+          <Link href="/login" className="text-brassLit hover:underline">
             Sign in
           </Link>
         </p>

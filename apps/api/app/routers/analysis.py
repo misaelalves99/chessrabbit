@@ -3,50 +3,57 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+import logging
+import os
+from functools import lru_cache
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+import chess
+import chess.syzygy
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.chess_utils import validate_fen, zobrist_of
 from app.core.config import settings
 from app.core.db import get_db
-from app.core.deps import check_and_increment_usage, get_current_user, require_pro
+from app.core.deps import check_and_increment_usage, get_current_user
+from app.core.engines import resolve_engine
+from app.core.ratelimit import user_rate_limit
 from app.core.redis_client import get_redis
-from app.core.tiers import UNLIMITED, is_paid, tier_for
 from app.models import AnalysisCache, AnalysisJob, Game, User
 from app.schemas import AnalysePositionRequest, AnalysisJobOut
 
+log = logging.getLogger(__name__)
 
-async def _check_review_quota(db: AsyncSession, user: User) -> None:
-    """Free tier: a fixed number of full-game reviews per day."""
-    tier = tier_for(user.plan)
-    if tier.reviews_per_day == UNLIMITED:
-        return
-    used = (
-        await db.execute(
-            select(func.count(AnalysisJob.id)).where(
-                AnalysisJob.user_id == user.id,
-                AnalysisJob.kind == "full_game",
-                AnalysisJob.created_at >= date.today(),
-            )
-        )
-    ).scalar_one()
-    if used >= tier.reviews_per_day:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "upgrade_required",
-                "message": f"The free plan includes {tier.reviews_per_day} game reviews "
-                           "per day. Upgrade for unlimited reviews.",
-            },
-        )
+
+@lru_cache(maxsize=1)
+def _tablebase() -> chess.syzygy.Tablebase | None:
+    """
+    The process-wide Syzygy handle, or None when tablebases aren't installed.
+
+    open_tablebase() opens and memory-maps every .rtbw/.rtbz in the directory -
+    around 145 files for the 3-4-5 piece set. Doing that per request made a
+    probe cost far more than the lookup it wrapped; the handle is safe to reuse
+    for probing, so one instance serves the process.
+    """
+    if not settings.SYZYGY_PATH or not os.path.isdir(settings.SYZYGY_PATH):
+        return None
+    try:
+        return chess.syzygy.open_tablebase(settings.SYZYGY_PATH)
+    except (OSError, ValueError):
+        log.warning("SYZYGY_PATH set but no tablebases could be opened", exc_info=True)
+        return None
+
+
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 
-@router.post("/position", response_model=AnalysisJobOut)
+@router.post(
+    "/position",
+    response_model=AnalysisJobOut,
+    dependencies=[user_rate_limit("analyse_position", 120, 60)],
+)
 async def analyse_position(
     payload: AnalysePositionRequest,
     user: User = Depends(get_current_user),
@@ -66,23 +73,26 @@ async def analyse_position(
             detail={"code": "invalid_fen", "message": str(exc)},
         )
 
-    # Clamp request to the caller's plan rather than rejecting outright
-    depth = min(payload.depth, settings.max_depth_for(user.plan))
-    multipv = min(payload.multipv, settings.max_multipv_for(user.plan))
+    # Clamp to local resource limits shared by every account
+    engine = await resolve_engine(payload.engine)
+    depth = min(payload.depth, settings.ENGINE_MAX_DEPTH)
+    multipv = min(payload.multipv, settings.ENGINE_MAX_MULTIPV)
     zob = zobrist_of(payload.fen)
 
     cached = await db.execute(
         select(AnalysisCache).where(
-            AnalysisCache.zobrist == zob, AnalysisCache.depth >= depth
+            AnalysisCache.zobrist == zob, AnalysisCache.depth >= depth,
+            AnalysisCache.engine_version == engine["cache_key"],
+            func.jsonb_array_length(AnalysisCache.multipv) >= multipv
         ).limit(1)
     )
     hit = cached.scalar_one_or_none()
     if hit:
         job = AnalysisJob(
             user_id=user.id, kind="position",
-            params={"fen": payload.fen, "depth": depth, "multipv": multipv},
+            params={"fen": payload.fen, "depth": depth, "multipv": multipv, "engine": payload.engine},
             status="done",
-            result={"cached": True, "depth": hit.depth, "lines": hit.multipv},
+            result={"cached": True, "depth": hit.depth, "lines": hit.multipv[:multipv], "engine": payload.engine},
         )
         db.add(job)
         await db.commit()
@@ -94,33 +104,41 @@ async def analyse_position(
 
     job = AnalysisJob(
         user_id=user.id, kind="position",
-        params={"fen": payload.fen, "depth": depth, "multipv": multipv},
+        params={"fen": payload.fen, "depth": depth, "multipv": multipv, "engine": payload.engine},
         status="queued",
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    queue = "q:pro" if is_paid(user.plan) else "q:free"
+    queue = f"q:{payload.engine}:interactive"
     await get_redis().rpush(
         queue,
         json.dumps({
             "job_id": job.id, "kind": "position", "fen": payload.fen,
-            "depth": depth, "multipv": multipv, "user_id": user.id,
+            "depth": depth, "multipv": multipv, "user_id": user.id, "engine": payload.engine,
         }),
     )
 
     return AnalysisJobOut(job_id=job.id, status="queued", cached=False)
 
 
-@router.post("/game/{game_id}", response_model=AnalysisJobOut)
+# Reviews have a request-rate limit to protect local resources.
+@router.post(
+    "/game/{game_id}",
+    response_model=AnalysisJobOut,
+    dependencies=[user_rate_limit("analyse_game", 30, 60)],
+)
 async def analyse_full_game(
     game_id: int,
+    engine: str = Query(default="stockfish", pattern=r"^[a-z0-9_-]{1,40}$"),
+    depth: int = Query(default=18, ge=1, le=40),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue a full-game annotation pass. Free tier: limited per day."""
-    await _check_review_quota(db, user)
+    """Queue a full-game annotation pass. All accounts have access."""
+    await resolve_engine(engine)
+    depth = min(depth, settings.ENGINE_MAX_DEPTH)
     game = await db.get(Game, game_id)
     if game is None or (game.owner_id is not None and game.owner_id != user.id):
         raise HTTPException(
@@ -130,37 +148,46 @@ async def analyse_full_game(
 
     job = AnalysisJob(
         user_id=user.id, game_id=game_id, kind="full_game",
-        params={"depth": 18}, status="queued",
+        params={"depth": depth, "engine": engine}, status="queued",
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
 
-    # q:batch, not q:pro: full-game jobs hold an engine for minutes and must
-    # never sit ahead of live position analyses (see services/engine/worker.py).
+    # Batch jobs run behind interactive position requests.
     await get_redis().rpush(
-        "q:batch",
+        f"q:{engine}:batch",
         json.dumps({
             "job_id": job.id, "kind": "full_game", "game_id": game_id,
-            "user_id": user.id, "depth": 18,
+            "user_id": user.id, "depth": depth, "engine": engine,
         }),
     )
     return AnalysisJobOut(job_id=job.id, status="queued")
 
 
-@router.post("/collection/{collection_id}", response_model=list[AnalysisJobOut])
+# 25 full-game reviews per call, so this is the single heaviest request in the
+# API. Five a minute is still 125 games queued per minute per account.
+@router.post(
+    "/collection/{collection_id}",
+    response_model=list[AnalysisJobOut],
+    dependencies=[user_rate_limit("analyse_collection", 5, 60)],
+)
 async def analyse_collection(
     collection_id: int,
-    user: User = Depends(require_pro),
+    engine: str = Query(default="stockfish", pattern=r"^[a-z0-9_-]{1,40}$"),
+    depth: int = Query(default=18, ge=1, le=40),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Queue a full-game annotation pass for every game in a collection (Pro).
+    """Queue a full-game annotation pass for every game in a collection.
 
     Capped at 25 games per request to keep one user from monopolising the
     engine pool; call again for the next batch.
     """
     from app.models import Collection, CollectionGame
 
+    await resolve_engine(engine)
+    depth = min(depth, settings.ENGINE_MAX_DEPTH)
     col = await db.get(Collection, collection_id)
     if col is None or col.user_id != user.id:
         raise HTTPException(
@@ -168,9 +195,16 @@ async def analyse_collection(
             detail={"code": "not_found", "message": "Collection not found"},
         )
 
+    # Join through games and re-check ownership rather than trusting membership:
+    # a collection row is only as trustworthy as every path that ever wrote to
+    # it, and the job result this produces is readable by the caller.
     rows = await db.execute(
         select(CollectionGame.game_id)
-        .where(CollectionGame.collection_id == collection_id)
+        .join(Game, Game.id == CollectionGame.game_id)
+        .where(
+            CollectionGame.collection_id == collection_id,
+            (Game.owner_id == user.id) | (Game.owner_id.is_(None)),
+        )
         .limit(25)
     )
     game_ids = [r[0] for r in rows.all()]
@@ -181,25 +215,37 @@ async def analyse_collection(
         )
 
     redis = get_redis()
-    out: list[AnalysisJobOut] = []
-    for gid in game_ids:
-        job = AnalysisJob(
-            user_id=user.id, game_id=gid, kind="full_game",
-            params={"depth": 18}, status="queued",
-        )
-        db.add(job)
-        await db.flush()
-        out.append(AnalysisJobOut(job_id=job.id, status="queued"))
 
+    # One INSERT for the whole batch. sort_by_parameter_order is what lets the
+    # returned ids be zipped back to their game ids below; without it Postgres
+    # is free to return them in any order and every queued job would name the
+    # wrong game.
+    result = await db.execute(
+        insert(AnalysisJob).returning(AnalysisJob.id, sort_by_parameter_order=True),
+        [
+            {
+                "user_id": user.id, "game_id": gid, "kind": "full_game",
+                "params": {"depth": depth, "engine": engine}, "status": "queued",
+            }
+            for gid in game_ids
+        ],
+    )
+    out = [AnalysisJobOut(job_id=row[0], status="queued") for row in result]
     await db.commit()
+
+    # Queue after the commit, in one pipeline: a worker that picks a job up
+    # before its row is visible fails looking it up, and 25 sequential rpushes
+    # is 25 round trips to Redis for what is one write batch.
+    pipe = redis.pipeline(transaction=False)
     for job_out, gid in zip(out, game_ids):
-        await redis.rpush(
-            "q:batch",
+        pipe.rpush(
+            f"q:{engine}:batch",
             json.dumps({
                 "job_id": job_out.job_id, "kind": "full_game",
-                "game_id": gid, "user_id": user.id, "depth": 18,
+                "game_id": gid, "user_id": user.id, "depth": depth, "engine": engine,
             }),
         )
+    await pipe.execute()
     return out
 
 
@@ -218,10 +264,6 @@ async def tablebase_probe(
     rather than an error: absence of tablebases is a configuration state,
     not a client mistake.
     """
-    import os
-
-    import chess.syzygy
-
     try:
         board = validate_fen(fen)
     except ValueError as exc:
@@ -255,11 +297,11 @@ async def tablebase_probe(
             "detail": "Insufficient mating material",
         }
 
-    if settings.SYZYGY_PATH and os.path.isdir(settings.SYZYGY_PATH):
+    tb = _tablebase()
+    if tb is not None:
         try:
-            with chess.syzygy.open_tablebase(settings.SYZYGY_PATH) as tb:
-                wdl = tb.probe_wdl(board)   # side-to-move view: 2/1/0/-1/-2
-                dtz = tb.probe_dtz(board)
+            wdl = tb.probe_wdl(board)   # side-to-move view: 2/1/0/-1/-2
+            dtz = tb.probe_dtz(board)
         except (KeyError, chess.syzygy.MissingTableError):
             return {
                 "available": False,

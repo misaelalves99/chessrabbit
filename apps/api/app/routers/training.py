@@ -22,9 +22,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.bulk import bulk_insert
 from app.core.chess_utils import extract_repertoire
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.ratelimit import user_rate_limit
 from app.models import Repertoire, TrainingCard, User
 from app.schemas import (
     RepertoireCreate, RepertoireOut, TrainingAnswer, TrainingCardOut, TrainingResult,
@@ -36,7 +38,9 @@ MAX_CARDS_PER_REPERTOIRE = 2000
 RETRY_MINUTES = 10
 
 
-@router.post("/repertoires", response_model=RepertoireOut, status_code=status.HTTP_201_CREATED)
+@router.post("/repertoires", response_model=RepertoireOut,
+             status_code=status.HTTP_201_CREATED,
+             dependencies=[user_rate_limit("create_repertoire", 20, 60)])
 async def create_repertoire(
     payload: RepertoireCreate,
     user: User = Depends(get_current_user),
@@ -66,17 +70,22 @@ async def create_repertoire(
     db.add(rep)
     await db.flush()
 
-    for c in cards:
-        db.add(
-            TrainingCard(
-                repertoire_id=rep.id,
-                user_id=user.id,
-                zobrist=c["zobrist"],
-                fen=c["fen"],
-                expected_uci=c["expected_uci"],
-                expected_san=c["expected_san"],
-            )
-        )
+    # Up to MAX_CARDS_PER_REPERTOIRE rows in chunked multi-row inserts rather
+    # than one statement per card. ignore_conflicts covers the UNIQUE
+    # (repertoire_id, zobrist) the extractor already dedupes on.
+    await bulk_insert(
+        db,
+        TrainingCard,
+        [
+            {
+                "repertoire_id": rep.id, "user_id": user.id,
+                "zobrist": c["zobrist"], "fen": c["fen"],
+                "expected_uci": c["expected_uci"], "expected_san": c["expected_san"],
+            }
+            for c in cards
+        ],
+        ignore_conflicts=True,
+    )
     await db.commit()
     return RepertoireOut(
         id=rep.id, name=rep.name, color=rep.color,
@@ -123,7 +132,12 @@ async def delete_repertoire(
 BLUNDER_REP_NAMES = {"white": "♞ My Blunders (White)", "black": "♞ My Blunders (Black)"}
 
 
-@router.post("/training/blunders/sync")
+# Walks and replays every reviewed game the user owns; the result barely
+# changes between runs, so there is no reason to allow it in a tight loop.
+@router.post(
+    "/training/blunders/sync",
+    dependencies=[user_rate_limit("blunder_sync", 5, 60)],
+)
 async def sync_blunder_puzzles(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -155,8 +169,12 @@ async def sync_blunder_puzzles(
     )
     mistakes = rows.all()
 
-    # Lazily create the two auto-repertoires on first use
+    # Lazily create the two auto-repertoires on first use, and pull each one's
+    # existing positions in a single query. Dedupe used to cost one SELECT per
+    # mistake, so a player with a few hundred tagged blunders paid a few
+    # hundred round trips to discover they already had the cards.
     reps: dict[str, Repertoire] = {}
+    known_zobrists: dict[str, set[int]] = {}
 
     async def rep_for(color: str) -> Repertoire:
         if color in reps:
@@ -172,11 +190,18 @@ async def sync_blunder_puzzles(
             rep = Repertoire(user_id=user.id, name=BLUNDER_REP_NAMES[color], color=color)
             db.add(rep)
             await db.flush()
+            known_zobrists[color] = set()
+        else:
+            rows = await db.execute(
+                select(TrainingCard.zobrist).where(TrainingCard.repertoire_id == rep.id)
+            )
+            known_zobrists[color] = set(rows.scalars().all())
         reps[color] = rep
         return rep
 
     created = skipped = invalid = 0
     board_cache: dict[int, list] = {}  # game_id -> parsed move list
+    new_cards: list[dict] = []  # written once at the end, not per mistake
 
     for game_id, ply, best_uci, movetext in mistakes:
         if game_id not in board_cache:
@@ -202,24 +227,19 @@ async def sync_blunder_puzzles(
         rep = await rep_for(color)
         zob = zobrist_of(board.fen())
 
-        dup = await db.execute(
-            select(TrainingCard.id).where(
-                TrainingCard.repertoire_id == rep.id,
-                TrainingCard.zobrist == zob,
-            )
-        )
-        if dup.scalar_one_or_none() is not None:
+        if zob in known_zobrists[color]:
             skipped += 1
             continue
+        known_zobrists[color].add(zob)
 
-        db.add(
-            TrainingCard(
-                repertoire_id=rep.id, user_id=user.id, zobrist=zob,
-                fen=board.fen(), expected_uci=best.uci(), expected_san=expected_san,
-            )
-        )
+        new_cards.append({
+            "repertoire_id": rep.id, "user_id": user.id, "zobrist": zob,
+            "fen": board.fen(), "expected_uci": best.uci(),
+            "expected_san": expected_san,
+        })
         created += 1
 
+    await bulk_insert(db, TrainingCard, new_cards, ignore_conflicts=True)
     await db.commit()
     return {
         "mistakes_found": len(mistakes),

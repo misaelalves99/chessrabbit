@@ -18,22 +18,27 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import func, select
 
+from app.core import revocation
 from app.core.chess_utils import validate_fen, zobrist_of
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.core.deps import check_and_increment_usage
+from app.core.engines import resolve_engine
 from app.core.redis_client import get_redis
 from app.core.security import decode_access_token
-from app.core.tiers import is_paid
 from app.models import AnalysisCache, AnalysisJob, User
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# Concurrent live analyses allowed per plan
-MAX_LIVE = {"free": 1, "pro": 3, "master": 3}
+# Each socket runs one analysis; the same concurrency limit applies to everyone.
+
+# The per-user socket counter self-heals: if a worker dies without running its
+# finally block the key expires rather than locking the user out forever.
+LIVE_TTL = 3600
 
 
 # How long a cancellation marker outlives the request. Only has to cover the
@@ -84,12 +89,14 @@ class ConnectionState:
             log.warning("could not signal cancel for job %s", job_id, exc_info=True)
 
 
-async def _relay(ws: WebSocket, job_id: int) -> None:
+async def _relay(ws: WebSocket, job_id: int, ready: asyncio.Event | None = None) -> None:
     """Forward every message on eval:{job_id} to the socket until 'done'."""
     redis = get_redis()
     pubsub = redis.pubsub()
     channel = f"eval:{job_id}"
     await pubsub.subscribe(channel)
+    if ready is not None:
+        ready.set()
 
     try:
         async for message in pubsub.listen():
@@ -109,24 +116,73 @@ async def _relay(ws: WebSocket, job_id: int) -> None:
         await pubsub.aclose()
 
 
+async def _reject(ws: WebSocket, code: int, reason: str) -> None:
+    """
+    Turn a socket away with a code the browser can actually read.
+
+    Closing before accept() makes Starlette answer the handshake with HTTP 403,
+    which every browser reports as close code 1006 and no reason - so the client
+    cannot tell "your token expired" from "the server blinked" and just
+    reconnects forever. Accepting first costs one frame and delivers the real
+    code, which is what lets useEngine stop retrying.
+    """
+    await ws.accept()
+    await ws.close(code=code, reason=reason)
+
+
 @router.websocket("/ws/analysis")
 async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
     payload = decode_access_token(token)
     if not payload:
-        await ws.close(code=4401, reason="Invalid or missing token")
+        await _reject(ws, 4401, "Invalid or missing token")
+        return
+
+    # A revoked token must not buy a socket that then outlives the sign-out:
+    # this connection can run engine searches for as long as it stays open.
+    if await revocation.is_revoked(payload.get("jti")):
+        await _reject(ws, 4401, "Invalid or missing token")
         return
 
     user_id = int(payload["sub"])
     async with SessionLocal() as db:
         user = await db.get(User, user_id)
         if user is None or user.deleted_at is not None:
-            await ws.close(code=4401, reason="Account not found")
+            await _reject(ws, 4401, "Account not found")
             return
-        plan = user.plan
+        # The REST surface refuses a suspended account at get_current_user;
+        # this socket only checked deleted_at, so suspending somebody left them
+        # a working route to the engine pool - the most expensive thing we own,
+        # and the usual reason an account gets suspended in the first place.
+        if user.suspended_at is not None:
+            await _reject(ws, 4403, "This account is suspended")
+            return
+
+    redis = get_redis()
+
+    # MAX_LIVE was declared but never consulted, so one account could hold open
+    # any number of sockets and keep that many engine searches running.
+    live_key = f"ws:live:{user_id}"
+    allowed = settings.ENGINE_MAX_LIVE_ANALYSES
+    try:
+        in_flight = await redis.incr(live_key)
+        await redis.expire(live_key, LIVE_TTL)
+    except Exception:
+        log.warning("live-socket counter unavailable; admitting socket", exc_info=True)
+        in_flight = 1
+    if in_flight > allowed:
+        try:
+            await redis.decr(live_key)
+        except Exception:
+            pass
+        await _reject(
+            ws, 4429,
+            f"Local resources allow {allowed} live analysis "
+            f"{'board' if allowed == 1 else 'boards'} at a time",
+        )
+        return
 
     await ws.accept()
     state = ConnectionState()
-    redis = get_redis()
 
     try:
         while True:
@@ -153,14 +209,24 @@ async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
                     await ws.send_json({"type": "error", "code": "invalid_fen", "message": str(exc)})
                     continue
 
-                depth = min(int(msg.get("depth", 22)), settings.max_depth_for(plan))
-                multipv = min(int(msg.get("multipv", 1)), settings.max_multipv_for(plan))
+                try:
+                    engine = await resolve_engine(str(msg.get("engine", "stockfish")))
+                    depth = max(1, min(int(msg.get("depth", 22)), settings.ENGINE_MAX_DEPTH))
+                    multipv = max(1, min(int(msg.get("multipv", 1)), settings.ENGINE_MAX_MULTIPV))
+                except (ValueError, TypeError):
+                    await ws.send_json({"type": "error", "code": "bad_request", "message": "Invalid depth or number of lines"})
+                    continue
+                except HTTPException as exc:
+                    await ws.send_json({"type": "error", **exc.detail})
+                    continue
                 zob = zobrist_of(fen)
 
                 async with SessionLocal() as db:
                     cached = await db.execute(
                         select(AnalysisCache)
-                        .where(AnalysisCache.zobrist == zob, AnalysisCache.depth >= depth)
+                        .where(AnalysisCache.zobrist == zob, AnalysisCache.depth >= depth,
+                               AnalysisCache.engine_version == engine["cache_key"],
+                               func.jsonb_array_length(AnalysisCache.multipv) >= multipv)
                         .limit(1)
                     )
                     hit = cached.scalar_one_or_none()
@@ -168,13 +234,29 @@ async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
                     if hit:
                         await ws.send_json({
                             "type": "done", "cached": True,
-                            "depth": hit.depth, "lines": hit.multipv,
+                            "depth": hit.depth, "lines": hit.multipv[:multipv], "engine": engine["id"],
+                        })
+                        continue
+
+                    # Track usage without daily feature limits.
+                    user_row = await db.get(User, user_id)
+                    if user_row is None:
+                        await ws.close(code=4401, reason="Account not found")
+                        return
+                    try:
+                        await check_and_increment_usage(db, user_row)
+                    except HTTPException as exc:
+                        detail = exc.detail if isinstance(exc.detail, dict) else {}
+                        await ws.send_json({
+                            "type": "error",
+                            "code": detail.get("code", "daily_limit_reached"),
+                            "message": detail.get("message", "Daily analysis limit reached"),
                         })
                         continue
 
                     job = AnalysisJob(
                         user_id=user_id, kind="position",
-                        params={"fen": fen, "depth": depth, "multipv": multipv},
+                        params={"fen": fen, "depth": depth, "multipv": multipv, "engine": engine["id"]},
                         status="queued",
                     )
                     db.add(job)
@@ -184,12 +266,14 @@ async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
 
                 state.job_id = job_id
                 state.cancellable = True
-                state.relay = asyncio.create_task(_relay(ws, job_id))
+                ready = asyncio.Event()
+                state.relay = asyncio.create_task(_relay(ws, job_id, ready))
+                await asyncio.wait_for(ready.wait(), timeout=5)
 
-                queue = "q:pro" if is_paid(plan) else "q:free"
+                queue = f"q:{engine['id']}:interactive"
                 await redis.rpush(queue, json.dumps({
                     "job_id": job_id, "kind": "position", "fen": fen,
-                    "depth": depth, "multipv": multipv, "user_id": user_id,
+                    "depth": depth, "multipv": multipv, "user_id": user_id, "engine": engine["id"],
                 }))
                 await ws.send_json({"type": "queued", "job_id": job_id})
 
@@ -218,3 +302,7 @@ async def analysis_socket(ws: WebSocket, token: str = Query(default="")):
         log.exception("WS handler error")
     finally:
         await state.cancel()
+        try:
+            await redis.decr(live_key)
+        except Exception:
+            log.warning("could not release live-socket slot for %s", user_id, exc_info=True)

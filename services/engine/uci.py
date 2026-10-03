@@ -1,11 +1,6 @@
 """
-Stockfish UCI wrapper.
-
-LICENSING NOTE (BLUEPRINT.md Section 3):
-Stockfish is GPL-3.0. This module talks to an UNMODIFIED official Stockfish
-binary as a separate process over stdin/stdout. The binary lives ONLY on the
-server and is NEVER shipped to users. Do not vendor, patch, or compile
-Stockfish into any client artifact.
+UCI process wrapper for Stockfish, Lc0 and other locally configured engines.
+See THIRD_PARTY_NOTICES.md before redistributing engine binaries or networks.
 """
 
 from __future__ import annotations
@@ -14,10 +9,50 @@ import asyncio
 import logging
 import os
 import shutil
+import subprocess
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Callable
 
 log = logging.getLogger(__name__)
+
+
+class _WindowsPipe:
+    """Thread-backed pipes also work on psycopg's Windows selector loop."""
+
+    def __init__(self, pipe):
+        self.pipe = pipe
+
+    async def readline(self):
+        return await asyncio.to_thread(self.pipe.readline)
+
+    def write(self, data):
+        self.pipe.write(data)
+
+    async def drain(self):
+        await asyncio.to_thread(self.pipe.flush)
+
+
+class _WindowsProcess:
+    def __init__(self, binary: str, args: list[str]):
+        self.process = subprocess.Popen(
+            [binary, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        self.stdin = _WindowsPipe(self.process.stdin)
+        self.stdout = _WindowsPipe(self.process.stdout)
+
+    @property
+    def returncode(self):
+        return self.process.poll()
+
+    async def wait(self):
+        code = await asyncio.to_thread(self.process.wait)
+        self.process.stdin.close()
+        self.process.stdout.close()
+        return code
+
+    def kill(self):
+        self.process.kill()
 
 
 @dataclass
@@ -32,7 +67,7 @@ class EvalLine:
     nodes: int | None = None
     nps: int | None = None
 
-    def to_white_perspective(self, white_to_move: bool) -> "EvalLine":
+    def to_white_perspective(self, white_to_move: bool) -> EvalLine:
         """Engine reports from side-to-move view. Storage is always White's view."""
         if white_to_move:
             return self
@@ -139,6 +174,8 @@ class StockfishEngine:
         binary: str | None = None,
         threads: int = 2,
         hash_mb: int = 256,
+        args: list[str] | None = None,
+        options: dict | None = None,
     ) -> None:
         # Debian's package installs to /usr/games, which slim images omit from PATH.
         self.binary = (
@@ -149,31 +186,42 @@ class StockfishEngine:
         )
         self.threads = threads
         self.hash_mb = hash_mb
-        self.proc: asyncio.subprocess.Process | None = None
+        self.args = args or []
+        self.options = options or {}
+        self.supported_options: set[str] = set()
+        self.proc: asyncio.subprocess.Process | _WindowsProcess | None = None
         self.version: str = "unknown"
         self._lock = asyncio.Lock()
 
     # ---------- process lifecycle ----------
 
     async def start(self) -> None:
-        self.proc = await asyncio.create_subprocess_exec(
-            self.binary,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
+        if os.name == "nt":
+            self.proc = _WindowsProcess(self.binary, self.args)
+        else:
+            self.proc = await asyncio.create_subprocess_exec(
+                self.binary, *self.args, stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+        self.supported_options.clear()
         await self._send("uci")
         while True:
-            line = await self._readline()
+            line = await asyncio.wait_for(self._readline(), timeout=30)
             if line is None:
-                raise RuntimeError("Stockfish died during handshake")
+                raise RuntimeError("Engine died during UCI handshake")
             if line.startswith("id name"):
                 self.version = line[len("id name ") :].strip()
+            if line.startswith("option name ") and " type " in line:
+                self.supported_options.add(line[12:].split(" type ", 1)[0])
             if line.strip() == "uciok":
                 break
 
-        await self._send(f"setoption name Threads value {self.threads}")
-        await self._send(f"setoption name Hash value {self.hash_mb}")
+        await self.set_option("Threads", self.threads)
+        await self.set_option("Hash", self.hash_mb)
+        for name, value in self.options.items():
+            if name not in self.supported_options:
+                raise ValueError(f"Engine does not support option {name}")
+            await self.set_option(name, value)
         await self._ready()
         log.info("Engine ready: %s (threads=%d hash=%dMB)", self.version, self.threads, self.hash_mb)
 
@@ -184,6 +232,7 @@ class StockfishEngine:
                 await asyncio.wait_for(self.proc.wait(), timeout=5)
             except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError):
                 self.proc.kill()
+                await self.proc.wait()
         self.proc = None
 
     async def restart(self) -> None:
@@ -199,10 +248,18 @@ class StockfishEngine:
     # ---------- low-level IO ----------
 
     async def _send(self, cmd: str) -> None:
+        if "\n" in cmd or "\r" in cmd:
+            raise ValueError("UCI commands must occupy a single line")
         if not self.proc or not self.proc.stdin:
             raise RuntimeError("Engine not started")
         self.proc.stdin.write((cmd + "\n").encode())
         await self.proc.stdin.drain()
+
+    async def set_option(self, name: str, value) -> None:
+        if name in self.supported_options:
+            if isinstance(value, bool):
+                value = str(value).lower()
+            await self._send(f"setoption name {name} value {value}")
 
     async def _readline(self) -> str | None:
         if not self.proc or not self.proc.stdout:
@@ -215,7 +272,7 @@ class StockfishEngine:
     async def _ready(self) -> None:
         await self._send("isready")
         while True:
-            line = await self._readline()
+            line = await asyncio.wait_for(self._readline(), timeout=60)
             if line is None:
                 raise RuntimeError("Engine died waiting for readyok")
             if line.strip() == "readyok":
@@ -244,10 +301,10 @@ class StockfishEngine:
             if not self.alive:
                 await self.restart()
 
-            await self._send(f"setoption name MultiPV value {max(1, multipv)}")
+            await self.set_option("MultiPV", max(1, multipv))
             # Always set Skill Level so a weakened play move never leaks into the
             # next full-strength analysis on this reused engine (20 = full).
-            await self._send(f"setoption name Skill Level value {max(0, min(20, skill))}")
+            await self.set_option("Skill Level", max(0, min(20, skill)))
             await self._send("ucinewgame")
             await self._ready()
             await self._send(f"position fen {fen}")
@@ -255,7 +312,7 @@ class StockfishEngine:
             if infinite:
                 await self._send("go infinite")
             elif movetime_ms:
-                await self._send(f"go movetime {movetime_ms}")
+                await self._send(f"go depth {depth} movetime {movetime_ms}")
             else:
                 await self._send(f"go depth {depth}")
 
@@ -269,13 +326,13 @@ class StockfishEngine:
                     line = await asyncio.wait_for(self._readline(), timeout=120)
                 except asyncio.TimeoutError:
                     log.error("Engine read timeout; killing process")
-                    await self.restart()
-                    return
+                    await self.close()
+                    raise RuntimeError("Engine timed out during analysis")
 
                 if line is None:
                     log.error("Engine EOF; restarting")
-                    await self.restart()
-                    return
+                    await self.close()
+                    raise RuntimeError("Engine exited during analysis")
 
                 if line.startswith("bestmove"):
                     parts = line.split()
@@ -292,18 +349,20 @@ class StockfishEngine:
 class EnginePool:
     """A pool of Stockfish processes. Acquire/release with an async context manager."""
 
-    def __init__(self, size: int = 3, threads: int = 2, hash_mb: int = 256) -> None:
+    def __init__(self, size: int = 3, threads: int = 2, hash_mb: int = 256, **engine_kwargs) -> None:
         self.size = size
         self.threads = threads
         self.hash_mb = hash_mb
+        self.engine_kwargs = engine_kwargs
+        self.cache_key = "unknown"
         self._queue: asyncio.Queue[StockfishEngine] = asyncio.Queue()
         self._engines: list[StockfishEngine] = []
 
     async def start(self) -> None:
         for _ in range(self.size):
-            eng = StockfishEngine(threads=self.threads, hash_mb=self.hash_mb)
-            await eng.start()
+            eng = StockfishEngine(threads=self.threads, hash_mb=self.hash_mb, **self.engine_kwargs)
             self._engines.append(eng)
+            await eng.start()
             await self._queue.put(eng)
         log.info("Engine pool started with %d processes", self.size)
 

@@ -104,7 +104,7 @@ export default function Donut({
               x={cx}
               y={cy - 2}
               textAnchor="middle"
-              className="fill-ink font-display text-[15px] font-bold"
+              className="fill-ink text-[15px] font-bold"
             >
               {active
                 ? `${arcs.find((a) => a.key === active)!.share.toFixed(1)}%`
@@ -127,7 +127,7 @@ export default function Donut({
           <li
             key={a.key}
             className={`flex items-center gap-2 rounded px-1 py-0.5 transition-colors ${
-              active === a.key ? "bg-white/[0.07]" : ""
+              active === a.key ? "bg-ivory/[0.07]" : ""
             }`}
             onMouseEnter={() => setActive(a.key)}
             onMouseLeave={() => setActive(null)}
