@@ -8,6 +8,12 @@ Download [ChessRabbit-Setup.exe](https://github.com/shivamjg101/chessrabbit/rele
 
 Use **Engines → Add Leela Chess Zero** to select your local `lc0.exe` and network, or **Add UCI engine** for another engine. Then choose it in Analysis settings. See the [desktop guide](docs/DESKTOP.md) for data, engines, backups and building the installer.
 
+## About Me
+
+ChessRabbit is built by [Shivam Jaiswal](https://github.com/shivamjg101), a full-stack developer focused on practical chess tools, local-first software and AI-assisted workflows. I created ChessRabbit so players can analyze games on their own computer with strong engines, keep their data locally and use every feature without paid plans.
+
+If ChessRabbit helps your training, you can support the project at [buymeacoffee.com/shivamjg101](https://buymeacoffee.com/shivamjg101).
+
 ## Development and self-hosting
 
 Install Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin (Linux). Download this branch as a ZIP and extract it, or clone it:
