@@ -55,4 +55,4 @@ For native runtime validation:
 .\dist\windows\win-unpacked\ChessRabbit.exe --smoke-test --data-dir="$PWD\.test-cache\desktop-smoke"
 ```
 
-Run it twice to verify a saved game survives restart. Normal launches do not run these tests or create test games. Builds are unsigned until a Windows signing certificate is configured. The development Docker setup remains available in [LOCAL_SETUP.md](LOCAL_SETUP.md).
+Run it twice to verify a saved game survives restart. Normal launches do not run these tests or create test games. Builds are unsigned until a Windows signing certificate is configured. Unsigned builds can trigger SmartScreen or Defender reputation warnings. See [Windows security notes](WINDOWS_SECURITY.md) for release scanning, code signing and Microsoft false-positive submission steps. The development Docker setup remains available in [LOCAL_SETUP.md](LOCAL_SETUP.md).
