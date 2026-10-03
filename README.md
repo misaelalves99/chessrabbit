@@ -79,8 +79,9 @@ Every feature is available to every account. Resource limits apply equally to pr
 
 Your desktop games and results are stored in `%APPDATA%/ChessRabbit/local`. Docker deployments use local volumes. A new install starts with an empty personal/reference database. Reference games, puzzles, neural networks and Syzygy tablebases are optional datasets installed separately.
 
-## Community
+## Community and legal
 
+- Read the [privacy policy](PRIVACY.md), [security policy](SECURITY.md), [legal notes](LEGAL.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
 - Ask setup questions and share ideas in [Discussions](https://github.com/shivamjg101/chessrabbit/discussions).
 - Report reproducible bugs with the issue templates.
 - See the [roadmap](ROADMAP.md) for near-term work.
@@ -108,4 +109,4 @@ Existing installations must apply `db/migrations/016_community_edition.sql` befo
 
 ## License
 
-ChessRabbit is licensed under **GPL-3.0**, see [LICENSE](LICENSE). Third-party software and datasets retain their licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Windows build workflow produces an installer and corresponding source release.
+ChessRabbit is licensed under **GPL-3.0**, see [LICENSE](LICENSE). Third-party software and datasets retain their licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Public downloads should include corresponding source, notices and checksums; see [LEGAL.md](LEGAL.md). The Windows build workflow produces an installer and corresponding source release.
