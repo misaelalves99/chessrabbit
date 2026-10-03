@@ -1,0 +1,14 @@
+title: "[Question]: "
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      placeholder: "How do I..."
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Add your ChessRabbit version, operating system, engine, and anything you already tried.

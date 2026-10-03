@@ -1,0 +1,56 @@
+name: Bug report
+description: Report something that is broken in ChessRabbit.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please include enough detail for someone else to reproduce it.
+  - type: input
+    id: version
+    attributes:
+      label: ChessRabbit version
+      description: Use the release version or installer name if you know it.
+      placeholder: "desktop-v0.1.0 / ChessRabbit-Setup.exe"
+  - type: dropdown
+    id: install_type
+    attributes:
+      label: How are you running ChessRabbit?
+      options:
+        - Windows desktop app
+        - Docker / self-hosted
+        - Development checkout
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem clearly.
+      placeholder: "I opened a PGN, clicked Analyze, and..."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Click...
+        3. See...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Add screenshots, error messages, or relevant logs. Do not paste private games or secrets unless you are comfortable sharing them publicly.
+      render: text

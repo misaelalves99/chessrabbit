@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement for ChessRabbit.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping shape ChessRabbit. Please describe the player workflow you want to improve.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      placeholder: "When I study games, I want to..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the feature
+      placeholder: "Add a way to..."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Analysis
+        - Engines
+        - PGN / games
+        - Studies
+        - Training
+        - Desktop installer
+        - Documentation
+        - Other
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or examples
+      description: Mention similar tools, screenshots, or workflows if useful.
