@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">ChessRabbit preview</title>
+  <desc id="desc">A promotional card for ChessRabbit, a free local chess analysis desktop app.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101827"/>
+      <stop offset="0.52" stop-color="#17231f"/>
+      <stop offset="1" stop-color="#281c10"/>
+    </linearGradient>
+    <linearGradient id="boardLight" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e6d8b8"/>
+      <stop offset="1" stop-color="#c9a86a"/>
+    </linearGradient>
+    <linearGradient id="boardDark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22423c"/>
+      <stop offset="1" stop-color="#112924"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <circle cx="1120" cy="70" r="150" fill="#f0b84a" opacity="0.12"/>
+  <circle cx="150" cy="560" r="170" fill="#43c59e" opacity="0.10"/>
+  <g transform="translate(70 82)">
+    <text x="0" y="44" fill="#f7f3e8" font-family="Georgia, serif" font-size="54">ChessRabbit</text>
+    <text x="0" y="91" fill="#d6c7a4" font-family="Arial, sans-serif" font-size="23">Free local chess analysis for Windows</text>
+    <text x="0" y="160" fill="#ffffff" font-family="Arial, sans-serif" font-size="34" font-weight="700">Stockfish, Leela and UCI engines</text>
+    <text x="0" y="205" fill="#cfe1dc" font-family="Arial, sans-serif" font-size="24">Analyze PGNs, review games, build studies and keep your data on your PC.</text>
+    <g transform="translate(0 264)">
+      <rect width="226" height="52" rx="8" fill="#f0b84a"/>
+      <text x="26" y="34" fill="#111827" font-family="Arial, sans-serif" font-size="20" font-weight="700">Download setup.exe</text>
+    </g>
+    <g transform="translate(0 350)" fill="#f7f3e8" font-family="Arial, sans-serif" font-size="22">
+      <text y="0">- No paid plans</text>
+      <text y="40">- Local database</text>
+      <text y="80">- Windows installer</text>
+      <text y="120">- GPL-3.0</text>
+    </g>
+  </g>
+  <g transform="translate(760 92)" filter="url(#shadow)">
+    <rect x="0" y="0" width="410" height="410" rx="18" fill="#0b111b" stroke="#d8b76d" stroke-opacity="0.35"/>
+    <g transform="translate(34 34)">
+      <rect x="0" y="0" width="42" height="42" fill="url(#boardLight)"/>
+      <rect x="42" y="0" width="42" height="42" fill="url(#boardDark)"/>
+      <rect x="84" y="0" width="42" height="42" fill="url(#boardLight)"/>
+      <rect x="126" y="0" width="42" height="42" fill="url(#boardDark)"/>
+      <rect x="168" y="0" width="42" height="42" fill="url(#boardLight)"/>
+      <rect x="210" y="0" width="42" height="42" fill="url(#boardDark)"/>
+      <rect x="252" y="0" width="42" height="42" fill="url(#boardLight)"/>
+      <rect x="294" y="0" width="42" height="42" fill="url(#boardDark)"/>
+      <g id="odd">
+        <rect x="0" y="42" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="42" y="42" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="84" y="42" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="126" y="42" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="168" y="42" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="210" y="42" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="252" y="42" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="294" y="42" width="42" height="42" fill="url(#boardLight)"/>
+      </g>
+      <g id="even">
+        <rect x="0" y="84" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="42" y="84" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="84" y="84" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="126" y="84" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="168" y="84" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="210" y="84" width="42" height="42" fill="url(#boardDark)"/>
+        <rect x="252" y="84" width="42" height="42" fill="url(#boardLight)"/>
+        <rect x="294" y="84" width="42" height="42" fill="url(#boardDark)"/>
+      </g>
+      <use href="#odd" y="84"/>
+      <use href="#even" y="84"/>
+      <use href="#odd" y="168"/>
+      <use href="#even" y="168"/>
+      <use href="#odd" y="252"/>
+      <text x="72" y="116" font-family="Georgia, serif" font-size="56" fill="#f8f4e8">N</text>
+      <text x="198" y="158" font-family="Georgia, serif" font-size="56" fill="#121821">Q</text>
+      <text x="240" y="284" font-family="Georgia, serif" font-size="56" fill="#f8f4e8">K</text>
+      <path d="M68 68 C140 42, 185 150, 264 132" fill="none" stroke="#f0b84a" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="264" cy="132" r="10" fill="#f0b84a"/>
+    </g>
+  </g>
+  <text x="760" y="560" fill="#d6c7a4" font-family="Arial, sans-serif" font-size="22">github.com/shivamjg101/chessrabbit</text>
+</svg>
