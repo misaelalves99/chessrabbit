@@ -4,6 +4,19 @@ Download **ChessRabbit-Setup.exe**, run the installer, and open ChessRabbit usin
 
 The app is free, GPL-3.0 open source, with optional [donations](https://buymeacoffee.com/shivamjg101). No subscription, activation key or account registration is required.
 
+## System requirements
+
+| Requirement | Minimum | Recommended |
+| --- | --- | --- |
+| Operating system | Windows 10 or Windows 11 | Windows 11 |
+| CPU | 64-bit Intel or AMD processor | 4+ CPU cores for faster analysis |
+| Memory | 4 GB RAM | 8 GB+ RAM, especially for deeper analysis |
+| Storage | 1 GB free space for the app | 3 GB+ free space for games, logs and future updates |
+| Internet | Required for download and online imports | Optional after install for local PGN analysis |
+| Graphics | Any standard Windows display | Dedicated GPU only if you plan to run GPU Leela |
+
+Stockfish analysis works immediately after installation. Leela Chess Zero, neural-network files, Syzygy tablebases and large reference datasets are optional separate downloads.
+
 ## Engines
 
 - **Stockfish:** included and selected by default.
